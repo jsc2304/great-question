@@ -207,15 +207,17 @@ ${items.map((it, i) => `${i}: ${it.question}\n${it.hits.join('\n')}`).join('\n\n
 
 For every question, 2 to 3 answer options, each with "risk": "sourced" only when the lines above carry the answer, then "source" is the path:line it rests on; otherwise "vague", "commitment" or "risky", each with a "note".
 Language: ${languageRule(lang)} "note" in English.
-Format: {"answers": [[{"text": "", "risk": "sourced", "source": "path:12", "note": ""}]]}, one list per question, in order.`
+Format: {"answers": {"0": [{"text": "", "risk": "sourced", "source": "path:12", "note": ""}]}}, keyed by the question's number; leave out a question you cannot answer.`
 
 const parse = (reply: string) => JSON.parse(reply.slice(reply.indexOf('{'), reply.lastIndexOf('}') + 1)) as { answers?: unknown }
 
 /** Puts the answers a repository search grounded in place of a live question's own; a sourced one lifts its confidence. */
 export const applyGrounding = (live: Live, questions: readonly string[], reply: string): Live => {
-  let lists: unknown[]
+  let lists: Record<string, unknown>
   try {
-    lists = Array.isArray(parse(reply).answers) ? (parse(reply).answers as unknown[]) : []
+    const raw = parse(reply).answers
+    // A list by position only counts when it holds one entry per question: a short one would shift answers onto the wrong row.
+    lists = Array.isArray(raw) ? (raw.length === questions.length ? { ...raw } : {}) : raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
   } catch {
     return live
   }
