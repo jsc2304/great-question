@@ -2,6 +2,14 @@
 
 Versions follow semantic versioning. Newest release first.
 
+## 0.10.2 — 2026-10-15
+
+**Update the mod and run `/reload-plugins`; nothing else to do.**
+
+### Fixed
+
+- In live mode, a question asked in the meeting no longer shows an answer that belongs to another question. When the repository had nothing on one of several new questions, the answers found for the others moved up one row; each answer now stays with its own question.
+
 ## 0.10.1 — 2026-10-15
 
 **Update the mod and run `/reload-plugins`; nothing else to do.**

@@ -148,3 +148,16 @@ test('a source label names a URL, an issue, or a file with its line; a GitHub re
   expect(parseSource('next-steps/README.md (0.7.0, Marketplace section)')).toEqual({ path: 'next-steps/README.md', line: undefined })
   expect(parseSource('Offer p. 4')).toBeNull()
 })
+
+test('grounded answers stay with their question when the model leaves one out', async () => {
+  const homepage = { question: 'Can our marketing team change the homepage without asking a developer?', relevance: 4, confidence: 2, answers: [{ text: 'Through the CMS', risk: 'vague' as const }] }
+  const retention = { question: 'How long is customer data kept, and who at your company can access it?', relevance: 4, confidence: 2, answers: [{ text: 'Depends', risk: 'vague' as const }] }
+  const state = { ...IDLE, added: [homepage], next: [retention] }
+  const asked = [homepage.question, retention.question]
+  const confirm = '[{"text": "We will confirm the retention period and access policy in writing.", "risk": "commitment"}]'
+  const short = applyGrounding(state, asked, `{"answers": [${confirm}]}`)
+  expect(short.added[0]?.answers).toEqual(homepage.answers)
+  const keyed = applyGrounding(state, asked, `{"answers": {"1": ${confirm}}}`)
+  expect(keyed.added[0]?.answers).toEqual(homepage.answers)
+  expect(keyed.next[0]?.answers[0]?.risk).toBe('commitment')
+})
