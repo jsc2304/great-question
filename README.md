@@ -19,9 +19,17 @@ A pitch prepared: questions grouped by how surely they can be answered, each wit
 
 ![The Great Question panel: questions grouped by answer confidence, one opened with a sourced answer and a warning what not to say](docs/overview.png)
 
-Listening along: the question just asked moves to **ASKED NOW** with its prepared answer. While a question is open, new ones wait behind a button instead of moving the list:
+Where the documents give no firm answer, the panel says what you may promise only if it is covered, what is harmless but shallow, and what to leave out:
 
-![Listening: the question asked now with its answer and a button to take four new questions](docs/live-hold.png)
+![An unsure question with three kinds of answer: only if covered, weak, don't say](docs/answer-risks.png)
+
+Listening along: the question just asked moves to **ASKED NOW** with answers by risk, and the next likely questions appear below, each with its best answer in one line:
+
+![Listening: the question asked now with its answers and five likely next questions](docs/live.png)
+
+While a question is open, new ones wait behind a button instead of moving the list:
+
+![A held live list: the question asked now and a button to take four new questions](docs/live-hold.png)
 
 *Screenshots show a fictional pitch for a fictional company; no real meeting was recorded.*
 
