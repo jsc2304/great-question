@@ -1,0 +1,11 @@
+# Exports of question sets can hold meeting content; they stay local.
+question-sets/
+# Agent memory, handovers and local notes never go public.
+memory/
+CLAUDE.md
+CLAUDE.local.md
+.claude/
+# Laid by the engine at load time.
+.claude-plugin/types/
+tsconfig.json
+.DS_Store

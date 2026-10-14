@@ -1,0 +1,15 @@
+{
+  "name": "great-question",
+  "owner": {
+    "name": "Jan Schultheiss"
+  },
+  "metadata": {
+    "description": "Great Question, a Claude Code side panel with the likely questions for a meeting and answers ranked by risk"
+  },
+  "plugins": [
+    {
+      "name": "great-question",
+      "source": "./"
+    }
+  ]
+}
