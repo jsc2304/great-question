@@ -17,6 +17,8 @@ export type Fact = { text: string; source?: string }
 export type SourceKind = 'meeting' | 'repo' | 'ticket' | 'doc' | 'calendar' | 'other'
 export type Source = { kind: SourceKind; label: string }
 export type Lang = 'auto' | 'de' | 'en'
+/** Which model answers live and how hard it thinks: speed against depth. */
+export type Quality = 'fast' | 'balanced' | 'thorough'
 export type QuestionSet = {
   title: string
   mode: string
@@ -71,6 +73,8 @@ declare module 'claude-code' {
       view: 'meeting' | 'practice'
       sortBy: 'confidence' | 'likelihood'
       lang: Lang
+      /** Model and effort of the live step, the repository answers and the ASKED NOW lookup. */
+      quality: Quality
       live: Live
       version: string
     }

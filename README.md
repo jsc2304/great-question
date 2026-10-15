@@ -90,6 +90,7 @@ Buttons in the panel:
 - **Open all** and **Close all**: open or close every visible question. **Close all** shows as soon as one question is open and closes them all at once.
 - **View**: shows the less frequent settings:
   - **Language: Auto / DE / EN** of questions and answers. *Auto* uses the language the meeting is held in (from the invitation, slides and earlier transcripts when generating, from the conversation when listening). Applies to everything generated from then on, live included; nothing already shown is translated. Notes and reasons are in English.
+  - **Model**: who answers while listening and how hard it thinks: *Fast (Haiku)*, *Balanced (Sonnet, low effort)* or *Thorough (Sonnet, high effort)*. Applies to the live step, the answers from the repository and the model of the ASKED NOW lookup; the background preparation keeps the session's model. Slower levels answer later: a step still running when the next is due is skipped.
   - **Sort**: by answer confidence (*safest to answer*) or by likelihood (*most likely asked*).
   - **Meeting / Practice**: *Meeting* shows the strongest first, *Practice* turns the order round and puts the weakest questions on top.
   - **Export**: writes the panel as Markdown to `question-sets/YYYY-MM-DD-HHMM-<title>.md` in the project folder.
