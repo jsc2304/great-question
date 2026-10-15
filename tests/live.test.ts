@@ -81,6 +81,19 @@ test('a reply marks asked questions, sets the current one and adds new ones once
   expect(twice.added).toHaveLength(1)
 })
 
+test('a reply without a usable current points ASKED NOW at the question it saw asked last, not the old one', async () => {
+  const state = { ...IDLE, isOn: true, current: 'Do you use subcontractors?', asked: ['Do you use subcontractors?'] }
+  expect(applyReply(state, SET, '{"asked":[1],"current":null}').current).toBe('Who leads?')
+  const fresh = '{"new":[{"question":"Which payment methods at launch?","answers":[]}],"current":{"new":"0"}}'
+  expect(applyReply(state, SET, fresh).current).toBe('Which payment methods at launch?')
+  // Nothing newly asked: the question on the table stays.
+  expect(applyReply(state, SET, '{"asked":[],"current":null}').current).toBe('Do you use subcontractors?')
+})
+
+test('a line without a speaker is nobody in particular, not my microphone', async () => {
+  expect(parseTranscript('{"text":"Can you tell us which payment methods?","endRecordingMs":1}').tail).toBe('[] Unknown: Can you tell us which payment methods?')
+})
+
 test('a reply that is no JSON leaves the state alone', async () => {
   const state = { ...IDLE, isOn: true, current: 'Who leads?' }
   expect(applyReply(state, SET, 'I could not tell.')).toEqual(state)
@@ -165,7 +178,10 @@ test('grounded answers stay with their question when the model leaves one out', 
 test('the live task is about the questions I have to answer, and offers a safe answer before a promise', async () => {
   const t = task('x', 'en', 'Alex Example')
   expect(t).toContain('I am the person this pane is for: Alex Example.')
-  expect(t).toContain('Leave out questions to someone else about their own work.')
+  expect(t).toContain('to a role such as the project lead is asked of me')
+  expect(t).toContain('Leave out only questions addressed by name to someone else about their own work.')
+  expect(t).toContain('null only when the excerpt asks none')
+  expect(t).toContain('Only a "commitment" may promise anything')
   expect(t).toContain('questions I will most likely have to answer next')
   expect(t.indexOf('"vague": true and binding us to nothing')).toBeLessThan(t.indexOf('"commitment": only when the question asks'))
   expect(task('x')).toContain('I am the person this pane is for.')
