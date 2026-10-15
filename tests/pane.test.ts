@@ -63,13 +63,16 @@ test('show_questions stores the set surest first, the pane draws it, practice tu
     expect(await ui.find({ text: 'We already do that' })).toBeDefined()
     await ui.press({ key: TEAM })
 
-    // Open all / Close all reach every row, and the label follows what is on screen.
-    await ui.press({ key: 'all' })
-    expect(await ui.find({ text: 'We already do that' })).toBeDefined()
-    expect(await ui.find({ key: 'all', text: /Close all/ })).toBeDefined()
-    await ui.press({ key: 'all' })
-    expect(await ui.find({ text: 'We already do that' })).toBeUndefined()
+    // One row open: Close all closes it straight away, without opening the rest first.
+    await ui.press({ key: 'close-all' })
     expect(await ui.find({ text: 'Source: Offer p. 4' })).toBeUndefined()
+    expect(await ui.find({ key: 'close-all' })).toBeUndefined()
+    // Open all reaches every row and goes once every row is open; Close all closes them again.
+    await ui.press({ key: 'open-all' })
+    expect(await ui.find({ text: 'We already do that' })).toBeDefined()
+    expect(await ui.find({ key: 'open-all' })).toBeUndefined()
+    await ui.press({ key: 'close-all' })
+    expect(await ui.find({ text: 'We already do that' })).toBeUndefined()
     await ui.press({ key: COST })
 
     // Stopping the listener pauses it: the status stays and says so.
@@ -379,6 +382,38 @@ test('listening with nothing prepared: questions from the transcript, answers fr
   await ui.unmount()
 })
 
+test('a reply whose note or source is not text cannot blank the pane', async ($, on) => {
+  const clock = bottoms(on)
+  const say = meeting(on, clock)
+  on('agent.spawn', () => ({ model: 'haiku' }) as never)
+  await $.session.start({ cwd: '/repo' } as never)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'ear' })
+  // Asked now, so ASKED NOW draws its answers at once; before 0.10.3 the engine refused every redraw from here on.
+  say({ new: [{ question: 'How do we deploy?', answers: [{ text: 'Somehow', risk: 'vague', note: { why: 'x' }, source: { path: 'docs/ops.md' } }] }], current: { new: 0 } })
+  await clock.advance(20_000)
+  expect(await ui.find({ text: 'Somehow' })).toBeDefined()
+  await ui.press({ key: 'ear' })
+  expect(await ui.find({ key: 'ear', text: 'Listen live' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a pane blanked by answers 0.10.2 kept draws again once the mod loads anew', async ($, on) => {
+  bottoms(on)
+  // What 0.10.2 could keep: the question asked now, its lookup's answer with an object note.
+  const bad = [{ text: 'Somehow', risk: 'vague', note: { why: 'x' } }]
+  let isOld = true
+  on('state.set', ($, e, next) =>
+    next(isOld && e.key === 'live' ? ({ ...e, value: { ...(e.value as object), current: 'How?', added: [{ question: 'How?', relevance: 3, answers: bad }], deep: { 'How?': bad } } } as never) : e))
+  await $.session.start({ cwd: '/repo' } as never)
+  isOld = false
+  await expect($.ui.mount({ ...PANE, surface: 'desktop' })).rejects.toThrow(/refused/)
+  await $.session.start({ cwd: '/repo' } as never)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await ui.find({ text: 'Somehow' })).toBeDefined()
+  await ui.unmount()
+})
+
 test('a link lookup that fails is not kept: the next tick tries again and the link appears', async ($, on) => {
   const clock = bottoms(on)
   let isDown = true
@@ -431,5 +466,55 @@ test('source paths count from the folder the questions were prepared in, whereve
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect((await ui.find({ type: 'Link', text: 'next-steps/README.md (0.7.0)' }))?.props.href).toBe('https://github.com/acme/next-steps/blob/HEAD/README.md')
   expect(seen.every(p => p.startsWith('/work/mods/') && !p.startsWith('/work/mods/great-question/'))).toBe(true)
+  await ui.unmount()
+})
+
+test('listening: my last commits stay on show as safe to say; a closed row offers the safe answer, not the promise', async ($, on) => {
+  const clock = bottoms(on)
+  const replies: string[] = []
+  const prompts: string[] = []
+  mock.env(on, { HOME: '/h' })
+  on('fs.list', () => ({ value: [{ kind: 'dir', name: 'm1' }] }) as never)
+  on('fs.exists', () => ({ value: true }) as never)
+  on('fs.stat', () => ({ value: { mtimeMs: clock.now() } }) as never)
+  on('fs.read', ($, e) => ({ value: e.path.endsWith('live.ndjson') ? JSON.stringify({ text: 'Alex, how is the publish fix going?', endRecordingMs: 1 }) : '' }) as never)
+  on('model.complete', ($, e) => (prompts.push(JSON.stringify(e.prompt)), { value: { isAnswered: true, text: replies.shift() ?? '{}', usage: {} } }) as never)
+  on('process.run', ($, e) => {
+    const args = e.argv.join(' ')
+    const out = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '' } }) as never
+    if (args === 'git var GIT_AUTHOR_IDENT') return out('Alex Example <alex@example.com> 1760000000 +0200')
+    if (args.startsWith('git log')) return out('abc1234\t2026-10-14\tFix the publish rule')
+    return out('', 1)
+  })
+  await $.session.start({ cwd: '/repo' } as never)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'ear' })
+  replies.push(
+    JSON.stringify({
+      next: [{ question: 'When is the fix on PRE?', answers: [
+        { text: 'Tomorrow at nine', risk: 'commitment', note: 'nobody agreed a date' },
+        { text: 'It is fixed on Q; PRE is still open', risk: 'vague', note: 'thin' },
+      ] }],
+    }),
+  )
+  await clock.advance(20_000)
+  expect(prompts[0]).toContain('Alex Example')
+  expect(prompts[0]).toContain('Fix the publish rule (source: commit abc1234, 2026-10-14)')
+  expect(await ui.find({ text: 'SAFE TO SAY · MY RECENT WORK · 1' })).toBeDefined()
+  expect(await ui.find({ text: '● Fix the publish rule' })).toBeDefined()
+  expect(await ui.find({ text: 'Source: commit abc1234, 2026-10-14' })).toBeDefined()
+  expect(await ui.find({ text: /○ WEAK:/ })).toBeDefined()
+  expect(await ui.find({ text: /ONLY IF COVERED:/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('prepared questions carry what I worked on last; the pane shows it without listening', async ($, on) => {
+  bottoms(on)
+  await $.session.start({ cwd: '/repo' } as never)
+  const set = fromReply(JSON.stringify({ ...SET, recent: [{ text: 'Tested the fix on Q', source: 'Decision #6 (open)' }, { nope: 1 }] }), '2026-10-15 08:00')
+  expect(set?.recent).toEqual([{ text: 'Tested the fix on Q', source: 'Decision #6 (open)' }])
+  await $.tool.call({ tool: 'mcp__great-question__show_questions', ...SET, recent: set?.recent })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ text: '● Tested the fix on Q' })).toBeDefined()
   await ui.unmount()
 })

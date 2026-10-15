@@ -1,25 +1,30 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Answer, Lang, Live, Question, QuestionSet, Risk, Source, SourceKind } from '../types'
+import type { Answer, Fact, Lang, Live, Question, QuestionSet, Risk, Source, SourceKind } from '../types'
 import {
   GROUND_SYSTEM,
   IDLE,
   SYSTEM,
   applyGrounding,
   applyReply,
-  asRisk,
+  asText,
   githubBase,
   grepArgs,
   ground,
   knowledge,
   languageRule,
+  logArgs,
   lookupPrompt,
+  parseIdent,
+  parseLog,
   parseTranscript,
+  recentOf,
   rowKey,
   parseSource,
   settleLookup,
   task,
+  toAnswers,
   topHits,
   withRisks,
 } from './live'
@@ -50,13 +55,16 @@ const version = atom({ plugin: 'great-question', key: 'version' } as const, '')
 const LISTEN_MS = 20_000
 // A recording counts as running while Wispr wrote its live transcript this recently.
 const FRESH_MS = 3 * 60_000
+// A completion has no time limit of its own: one that never answered held the listening step, and every later one, for good.
+const MODEL_MS = 30_000
 
-// Display order: safest first, so the answer to give leads and the warning closes.
+// Display order: safest first, so the answer to give leads and the warning closes. A thin answer that binds us to
+// nothing comes before a promise: a closed row's one-line answer is never a commitment while a safer one exists.
 // `action` says what to do with the answer in the room; `label` is the risk class.
 const RISKS: Record<Risk, { mark: string; label: string; action: string; color: string }> = {
   sourced: { mark: '●', label: 'sourced', action: 'SAY IT', color: 'success' },
-  commitment: { mark: '▲', label: 'commitment', action: 'ONLY IF COVERED', color: 'warning' },
   vague: { mark: '○', label: 'vague', action: 'WEAK', color: 'inactive' },
+  commitment: { mark: '▲', label: 'commitment', action: 'ONLY IF COVERED', color: 'warning' },
   risky: { mark: '✖', label: 'risky', action: "DON'T SAY", color: 'error' },
 }
 const ORDER = Object.keys(RISKS) as Risk[]
@@ -100,6 +108,18 @@ const SCHEMA = {
             description: 'meeting: meeting notes and transcripts; repo: files in the repository; ticket: issues, pull requests, Jira; doc: documents outside the repository (Drive, offer, mail); calendar: appointments; other: the rest',
           },
           label: { type: 'string', description: 'What exactly, e.g. file path, meeting with date, ticket number' },
+        },
+      },
+    },
+    recent: {
+      type: 'array',
+      description: 'What I (the person preparing) worked on most recently, newest first: each one sentence that is certainly true and can be said in any meeting',
+      items: {
+        type: 'object',
+        required: ['text', 'source'],
+        properties: {
+          text: { type: 'string' },
+          source: { type: 'string', description: 'The commit, pull request, ticket or meeting with date that shows it' },
         },
       },
     },
@@ -159,7 +179,8 @@ Language: ${language === 'auto' ? 'Write "question" and the answer "text"s in th
    - commitment: binds us (date, price, scope, people); only when the documents cover it
    - risky: unsupported, contradicts the documents or is attackable; as a warning of what not to say
    Optional "note": what to watch out for.
-4. ${finish}`
+4. "recent": 3 to 6 things I (the person preparing: the git user, my own tickets) did most recently, newest first, in the language of the answers. Each one sentence I can say in any meeting whatever is asked, and certainly true: only what a commit, pull request, ticket or meeting you read shows, with it as "source".
+5. ${finish}`
 
 const storeKey = async ($: EngineInterface) => `set:${await $.session.cwd()}`
 
@@ -226,7 +247,7 @@ const linkAll = async ($: EngineInterface, labels: readonly (string | undefined)
 }
 
 const answerSources = (questions: readonly Question[]) => questions.flatMap(q => q.answers.map(a => a.source))
-const setLabels = (set: QuestionSet) => [...set.sources.map(src => asSource(src).label), ...answerSources(set.questions)]
+const setLabels = (set: QuestionSet) => [...set.sources.map(src => asSource(src).label), ...answerSources(set.questions), ...(set.recent ?? []).map(f => f.source)]
 
 /** Links for every source the pane can show that has none yet. Runs from a timer: drawing may not write state. */
 const linkPending = async ($: EngineInterface) => {
@@ -328,12 +349,12 @@ const toSet = (input: Record<string, unknown>, generatedAt: string, folder?: str
     .filter(q => typeof q?.question === 'string')
     .map(q => ({
       ...q,
+      who: asText(q.who),
+      why: asText(q.why),
+      answerer: asText(q.answerer),
       relevance: clamp(q.relevance),
       confidence: q.confidence === undefined ? undefined : clamp(q.confidence),
-      answers: (Array.isArray(q.answers) ? q.answers : []).map(a => ({
-        ...a,
-        risk: asRisk(a.risk),
-      })),
+      answers: toAnswers(q.answers),
     }))
     .sort(bySurest)
 
@@ -345,6 +366,9 @@ const toSet = (input: Record<string, unknown>, generatedAt: string, folder?: str
     sources: Array.isArray(input.sources) ? input.sources.map(asSource) : [],
     questions,
     folder: folder ?? (typeof input.folder === 'string' ? input.folder : undefined),
+    recent: Array.isArray(input.recent)
+      ? (input.recent as Fact[]).filter(f => typeof f?.text === 'string').map(f => ({ text: f.text, source: asText(f.source) }))
+      : undefined,
   }
 }
 
@@ -376,6 +400,16 @@ const runningRecording = async ($: EngineInterface, now: number) => {
 const repoHits = async ($: EngineInterface, terms: readonly string[]) => {
   const { exitCode, stdout } = await $.process.run(grepArgs(terms), { timeoutMs: 5000 }).catch(() => ({ exitCode: 2, stdout: '' }))
   return exitCode === 0 ? topHits(stdout, terms) : []
+}
+
+/** My name and latest commits in the folder the questions are about; nothing outside a git repository. */
+const myWork = async ($: EngineInterface, cwd: string) => {
+  try {
+    const me = parseIdent(await git($, ['var', 'GIT_AUTHOR_IDENT'], cwd))
+    return { name: me?.name ?? '', recent: me ? parseLog(await git($, logArgs(me.email), cwd)) : [] }
+  } catch {
+    return { name: '', recent: [] }
+  }
 }
 
 // Repository lookups by subagent: agent id to the question it looks up. A notification of one of them is dropped.
@@ -415,24 +449,26 @@ const listen = async ($: EngineInterface) => {
     await update($, live, l => (l.isOn ? { ...l, status: reading(l) } : l))
     return
   }
+  const me = await myWork($, set?.folder ?? (await $.session.cwd()))
   // ponytail: haiku, whole tail every 20 s while lines grow; a cheaper diff-only prompt if cost matters
   const reply = await $.model.complete({
     model: 'haiku',
     system: SYSTEM,
-    prompt: [{ text: knowledge(set, base), cache: true }, { text: task(tail, await read($, lang)) }],
+    prompt: [{ text: knowledge(set, { ...base, recent: me.recent }), cache: true }, { text: task(tail, await read($, lang), me.name) }],
     maxTokens: 2000,
+    timeoutMs: MODEL_MS,
   })
   if (!reply.isAnswered) {
     await update($, live, l => ({ ...l, status: `model gave no answer (${reply.reason})` }))
     return
   }
-  let step = { ...applyReply(base, set, reply.text), lines, changedAt: now }
+  let step = { ...applyReply(base, set, reply.text), lines, changedAt: now, recent: me.recent }
   // New questions from this step: look their words up in the repository and let the model answer from the lines found.
   const isNew = (q: Question, before: Question[]) => !before.some(b => b.question === q.question)
   const fresh = [...step.added.filter(q => isNew(q, base.added)), ...step.next.filter(q => isNew(q, base.next))].filter(q => q.search?.length)
   const items = (await Promise.all(fresh.map(async q => ({ question: q.question, hits: await repoHits($, q.search!) })))).filter(it => it.hits.length)
   if (items.length) {
-    const grounded = await $.model.complete({ model: 'haiku', system: GROUND_SYSTEM, prompt: [{ text: ground(items, await read($, lang)) }], maxTokens: 2000 })
+    const grounded = await $.model.complete({ model: 'haiku', system: GROUND_SYSTEM, prompt: [{ text: ground(items, await read($, lang)) }], maxTokens: 2000, timeoutMs: MODEL_MS })
     if (grounded.isAnswered) step = applyGrounding(step, items.map(it => it.question), grounded.text)
   }
   // Keep what a lookup finished or started meanwhile; this step does not know about it.
@@ -478,6 +514,7 @@ export const toMarkdown = (set: QuestionSet | null, ear: Live, exportedAt: strin
   const questions = [...(set?.questions ?? [])].sort(bySurest)
   const section = (title: string, list: Question[]) => (list.length ? [`## ${title}`, '', ...list.map(mdQuestion)] : [])
   const sources = (set?.sources ?? []).map(asSource)
+  const recent = recentOf(set, ear)
 
   return [
     `# ${set?.title ?? 'Questions from the conversation'}`,
@@ -486,6 +523,7 @@ export const toMarkdown = (set: QuestionSet | null, ear: Live, exportedAt: strin
     '',
     `Legend: ${ORDER.map(r => `${RISKS[r].mark} ${RISKS[r].action.toLowerCase()} (${RISKS[r].label})`).join(' · ')}`,
     '',
+    ...(recent.length ? ['## Safe to say: my recent work', '', ...recent.map(f => `- ${f.text}${f.source ? ` (${f.source})` : ''}`), ''] : []),
     ...GROUPS.flatMap((g, k) =>
       section(g.label, questions.filter(q => confidenceOf(q) >= g.min && (k === 0 || confidenceOf(q) < GROUPS[k - 1]!.min))),
     ),
@@ -557,7 +595,9 @@ export const register: Register = on => {
     await update($, links, () => ({}))
     // Background agents do not outlive the module: nothing is still being looked up or prepared.
     await update($, preparing, () => null)
-    await update($, live, l => ({ ...IDLE, ...l, added: withRisks(l.added ?? []), next: withRisks(l.next ?? []), looking: [] }))
+    // Answers 0.10.2 and earlier kept as the model wrote them: an object among them blanked the pane, so they are cleaned here too.
+    const cleaned = (deep: Live['deep'] = {}) => Object.fromEntries(Object.entries(deep).map(([q, list]) => [q, toAnswers(list)]))
+    await update($, live, l => ({ ...IDLE, ...l, added: withRisks(l.added ?? []), next: withRisks(l.next ?? []), deep: cleaned(l.deep), looking: [] }))
     await update($, held, h => h && { next: withRisks(h.next), added: withRisks(h.added) })
     // Questions on show from before 0.10 know no folder: the key they are stored under names it.
     const shown = await read($, current)
@@ -662,6 +702,7 @@ export const register: Register = on => {
     // Spread over IDLE: a value from an older version of the mod may lack newer fields.
     const ear: Live = { ...IDLE, ...(await read($, live)) }
     const shown = await read($, version)
+    const recent = recentOf(stored, ear)
     const hasLive = ear.asked.length + ear.added.length + ear.next.length > 0
 
     // Without a set the pane still listens; it just has nothing prepared to match.
@@ -766,7 +807,9 @@ export const register: Register = on => {
     // The question on the table, always live; its row stays in its section too.
     const nowRow = ear.current ? [...set.questions, ...ear.added].find(q => q.question === ear.current) : undefined
     const rows = [...nextRows, ...addedRows, ...listed.flatMap(g => g.items), ...asked]
+    // Two buttons, not one toggle: closing must never mean opening every row first.
     const isAllOpen = rows.length > 0 && rows.every(isOpen)
+    const isAnyOpen = rows.some(isOpen)
     const sorting = isPractice
       ? `Practice: ${isByLikely ? 'rarest' : 'least certain'} first`
       : isByLikely ? 'most likely first' : 'surest first'
@@ -805,9 +848,8 @@ export const register: Register = on => {
             }
           />
           <Button key="gen" label={prep ? 'Finding …' : 'Find likely questions'} onPress={() => startPrep($, '')} />
-          {rows.length > 0 && (
-            <Button key="all" label={isAllOpen ? 'Close all' : 'Open all'} onPress={() => setOpen($, () => (isAllOpen ? [] : rows.map(q => q.question)))} />
-          )}
+          {rows.length > 0 && !isAllOpen && <Button key="open-all" label="Open all" onPress={() => setOpen($, () => rows.map(q => q.question))} />}
+          {isAnyOpen && <Button key="close-all" label="Close all" onPress={() => setOpen($, () => [])} />}
           <Button key="more" dimColor label={isMore ? 'View ▾' : 'View ▸'} onPress={() => update($, more, m => !m)} />
         </Box>
         {isMore && (
@@ -868,6 +910,18 @@ export const register: Register = on => {
             ) : (
               <Text dimColor>no question recognised yet</Text>
             )}
+          </Box>
+        )}
+        {/* True whatever is asked: what I worked on last, to fall back on when no answer above fits. */}
+        {recent.length > 0 && (
+          <Box key="safe" flexDirection="column">
+            {heading(`SAFE TO SAY · MY RECENT WORK · ${recent.length}`)}
+            {recent.map((f, j) => (
+              <Box key={`f${j}`} flexDirection="column" marginTop={1}>
+                <Text color="success">● {f.text}</Text>
+                {f.source && <Box paddingLeft={2}>{sourceOf(f.source, 'Source:', `fs${j}`)}</Box>}
+              </Box>
+            ))}
           </Box>
         )}
         {waiting > 0 && (

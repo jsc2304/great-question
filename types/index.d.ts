@@ -12,6 +12,8 @@ export type Question = {
   /** Words to look up in the repository, from a live step; not shown. */
   search?: string[]
 }
+/** Something I certainly did, said as is in any meeting. */
+export type Fact = { text: string; source?: string }
 export type SourceKind = 'meeting' | 'repo' | 'ticket' | 'doc' | 'calendar' | 'other'
 export type Source = { kind: SourceKind; label: string }
 export type Lang = 'auto' | 'de' | 'en'
@@ -26,6 +28,8 @@ export type QuestionSet = {
   language?: 'de' | 'en'
   /** The folder they were prepared in; source paths count from it. */
   folder?: string
+  /** What I worked on most recently, newest first; sets from before 0.11 have none. */
+  recent?: Fact[]
 }
 
 export type Live = {
@@ -44,6 +48,8 @@ export type Live = {
   deep: Record<string, Answer[]>
   /** Questions a repository lookup is still running for. */
   looking: string[]
+  /** My latest commits in the folder, read while listening. */
+  recent: Fact[]
 }
 
 declare module 'claude-code' {

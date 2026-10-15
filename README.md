@@ -4,13 +4,13 @@ A side panel for Claude Code that shows the questions most likely to come up bef
 
 **Works best with Wispr Flow.** Listening along during a meeting, with the question just asked and the next likely questions and their answers, needs [Wispr Flow](https://wisprflow.ai). Without Wispr Flow, Great Question prepares meetings but does not listen.
 
-Every answer carries its risk as a mark, a word and a colour:
+Every answer carries its risk as a mark, a word and a colour, safest first:
 
 | Mark | Meaning |
 |---|---|
 | ● **SAY IT** · sourced | well founded, with a source |
+| ○ **WEAK** · vague | true and binds us to nothing, but shallow |
 | ▲ **ONLY IF COVERED** · commitment | binds us (date, price, scope); say it only when the documents back it |
-| ○ **WEAK** · vague | harmless but shallow |
 | ✖ **DON'T SAY** · risky | unsupported, attackable or contradicting the documents |
 
 ## What it looks like
@@ -85,15 +85,21 @@ Sources and the sources of answers are links where they point somewhere: a URL, 
 
 Buttons in the panel:
 
-- **Listen live**: reads the running Wispr Flow recording every 20 seconds and shows **ASKED NOW**, **LIKELY NEXT** and **ASKED IN THE MEETING, NOT PREPARED**. Switching it off only pauses.
+- **Listen live**: reads the running Wispr Flow recording every 20 seconds and shows **ASKED NOW**, **SAFE TO SAY · MY RECENT WORK**, **LIKELY NEXT** and **ASKED IN THE MEETING, NOT PREPARED**. Switching it off only pauses.
 - **Find likely questions**: like `/great-question-prep` without an occasion. A background agent reads the repository and connected sources while your session stays free; the panel shows a turning ◐ with the time taken, and the questions appear when it is done.
-- **Open all / Close all**: opens or closes every visible question.
+- **Open all** and **Close all**: open or close every visible question. **Close all** shows as soon as one question is open and closes them all at once.
 - **View**: shows the less frequent settings:
   - **Language: Auto / DE / EN** of questions and answers. *Auto* uses the language the meeting is held in (from the invitation, slides and earlier transcripts when generating, from the conversation when listening). Applies to everything generated from then on, live included; nothing already shown is translated. Notes and reasons are in English.
   - **Sort**: by answer confidence (*safest to answer*) or by likelihood (*most likely asked*).
   - **Meeting / Practice**: *Meeting* shows the strongest first, *Practice* turns the order round and puts the weakest questions on top.
   - **Export**: writes the panel as Markdown to `question-sets/YYYY-MM-DD-HHMM-<title>.md` in the project folder.
   - **Clear** (only while paused): deletes the live results.
+
+While listening, the panel follows the questions you have to answer:
+
+- **ASKED NOW**, **LIKELY NEXT** and **ASKED IN THE MEETING, NOT PREPARED** hold questions asked of you or of everyone, or about something you work on. Questions to someone else about their own work stay out. In a video call your voice is the microphone; your git user name helps the model spot questions addressed to you by name.
+- **SAFE TO SAY · MY RECENT WORK** lists what you worked on last, true whatever is asked: from the preparation (commits, pull requests, tickets or meetings, each with its source), or, when the preparation has none, your last five commits in the folder (author = your git email, merges left out).
+- Live answers come safest first. A closed question shows the one that binds you to nothing before a promise; a commitment is offered only when the question asks for a date, an owner or a scope, and never with a date or name nobody gave.
 
 While listening, answers come from the repository too:
 
@@ -114,7 +120,7 @@ What gets prepared depends on the project: with slides, a pitch preparation or a
 - **Record only with consent.** Wispr Flow records through this computer's microphone and system audio; no bot appears in the video call, so the others cannot see that it is being transcribed. Get the consent of everyone in the meeting before recording. In Germany, recording the privately spoken word without consent is a criminal offence (§ 201 StGB).
 - **Transcription by Wispr Flow.** Recording happens locally, transcription happens in Wispr Flow's cloud ([Wispr: on-device recording](https://wisprflow.ai/notetaker/what-is-on-device-recording), as of 14.10.2026). Great Question reads the finished transcript from the Wispr Flow app's local file.
 - **Prepared questions** are stored locally per project folder. They stay on the computer.
-- **Listening along** sends the last two minutes of the transcript, the prepared questions and the repository lines found for new questions to a small Claude model (Haiku), through the same access as the session. A lookup for the question asked now runs as a read-only subagent (Haiku) in the session's folder. Speaker names from Wispr Flow are not sent; names mentioned in the conversation are in the text.
+- **Listening along** sends the last two minutes of the transcript, the prepared questions, the repository lines found for new questions, your git user name and your last five commit subjects to a small Claude model (Haiku), through the same access as the session. A lookup for the question asked now runs as a read-only subagent (Haiku) in the session's folder. Speaker names from Wispr Flow are not sent; names mentioned in the conversation are in the text.
 - **Exports** with live results contain questions from the conversation, names included. In projects with confidential content, add `question-sets/` to `.gitignore` or review it before committing.
 
 ## Development

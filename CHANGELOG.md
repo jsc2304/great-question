@@ -2,6 +2,37 @@
 
 Versions follow semantic versioning. Newest release first.
 
+## 0.11.1 — 2026-10-15
+
+**Update the mod and run `/reload-plugins`; nothing else to do.**
+
+### Fixed
+
+- **Close all** is its own button and shows as soon as one question is open. Before, the single button read **Open all** while only some questions were open, so closing them meant opening every question first; in a long meeting that opened dozens of questions at once.
+
+## 0.11.0 — 2026-10-15
+
+**Update the mod and run `/reload-plugins`. Questions prepared before 0.11.0 carry no recent work: prepare again to get it; while listening, your last commits stand in.**
+
+### Added
+
+- **SAFE TO SAY · MY RECENT WORK** under **ASKED NOW**: what you worked on last, each with its source, true whatever the meeting asks. The preparation now finds 3 to 6 such points from commits, pull requests, tickets and meetings; without them, listening shows your last five commits in the folder. The export lists them too.
+
+### Changed
+
+- Answers are shown safest first: **WEAK** (true, binds you to nothing) now comes before **ONLY IF COVERED**. A closed question's one-line answer is no longer a promise while a safer answer exists.
+- Live answers, repository answers and the lookup for the question asked now always offer an answer that binds you to nothing; a commitment only when the question asks for a date, an owner or a scope, never with a date or name nobody gave.
+- While listening, **ASKED NOW**, **LIKELY NEXT** and **ASKED IN THE MEETING, NOT PREPARED** follow the questions you have to answer: asked of you or of everyone, or about your work. Questions to someone else about their own work stay out. Your git user name and last commits go to the model with the transcript.
+
+## 0.10.3 — 2026-10-15
+
+**Update the mod and run `/reload-plugins`; nothing else to do. A pane that went blank while listening draws again after the reload.**
+
+### Fixed
+
+- In live mode, the pane no longer stops responding and then goes blank ("Nothing to show yet — great-question has not drawn in this pane"). When the model returned an answer whose note or source was not plain text, the app refused to draw the pane from then on, and opening it again with `/great-question` did not help. Such a note or source is now left out; answers already kept from earlier are cleaned the same way when the mod loads.
+- Listening no longer stops for good when the model does not answer: each call now gives up after 30 seconds and the next step tries again.
+
 ## 0.10.2 — 2026-10-15
 
 **Update the mod and run `/reload-plugins`; nothing else to do.**
