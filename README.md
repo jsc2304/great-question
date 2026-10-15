@@ -47,7 +47,7 @@ Where the documents give no firm answer, the panel offers, safest first, what is
 
 Listening along: the question just asked moves to **ASKED NOW** with answers by risk, your recent work stays on show as safe to say, and the next likely questions appear below, each with its safest answer in one line:
 
-![Listening: the question asked now with its answers, my recent work, three likely next questions and the question asked but not prepared](docs/live.png)
+![Listening: the question asked now with its answers, my recent work, two likely next questions and two questions asked but not prepared](docs/live.png)
 
 While a question is open, new ones wait behind a button instead of moving the list:
 
