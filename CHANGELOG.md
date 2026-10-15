@@ -2,6 +2,14 @@
 
 Versions follow semantic versioning. Newest release first.
 
+## 0.12.1 — 2026-10-15
+
+**Update the mod and run `/reload-plugins`; nothing else to do.**
+
+### Changed
+
+- The **View** button is now called **More**: besides Language, Model, Sort and Meeting/Practice, its row holds the actions Export and Clear.
+
 ## 0.12.0 — 2026-10-15
 
 **Update the mod and run `/reload-plugins`; nothing else to do. The default stays Fast (Haiku).**
