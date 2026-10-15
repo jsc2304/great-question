@@ -871,7 +871,7 @@ export const register: Register = on => {
           <Button key="gen" label={prep ? 'Finding …' : 'Find likely questions'} onPress={() => startPrep($, '')} />
           {rows.length > 0 && !isAllOpen && <Button key="open-all" label="Open all" onPress={() => setOpen($, () => rows.map(q => q.question))} />}
           {isAnyOpen && <Button key="close-all" label="Close all" onPress={() => setOpen($, () => [])} />}
-          <Button key="more" dimColor label={isMore ? 'View ▾' : 'View ▸'} onPress={() => update($, more, m => !m)} />
+          <Button key="more" dimColor label={isMore ? 'More ▾' : 'More ▸'} onPress={() => update($, more, m => !m)} />
         </Box>
         {isMore && (
           <Box flexDirection="column" rowGap={1}>

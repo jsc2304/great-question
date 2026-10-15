@@ -80,7 +80,8 @@ test('show_questions stores the set surest first, the pane draws it, practice tu
     await ui.press({ key: 'ear' })
     expect(await ui.find({ text: /paused · 0 utterances read · results stay/ })).toBeDefined()
 
-    // Language, sorting, view and export sit behind View.
+    // Language, sorting, view and export sit behind More.
+    expect(await ui.find({ key: 'more', text: 'More ▸' })).toBeDefined()
     expect(await ui.find({ key: 'lang' })).toBeUndefined()
     await ui.press({ key: 'more' })
     expect(await ui.find({ text: /^Prepared / })).toBeDefined()
