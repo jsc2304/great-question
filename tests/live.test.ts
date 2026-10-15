@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { IDLE, applyGrounding, githubBase, parseSource, settleLookup, applyReply, asRisk, grepArgs, isSameQuestion, parseAnswers, parseTranscript, rowKey, task, topHits } from '../hooks/live'
+import { IDLE, applyGrounding, githubBase, knowledge, logArgs, parseIdent, parseLog, parseSource, recentOf, settleLookup, applyReply, asRisk, grepArgs, isSameQuestion, parseAnswers, parseTranscript, rowKey, task, topHits } from '../hooks/live'
 import type { QuestionSet } from '../types'
 
 const SET: QuestionSet = {
@@ -160,4 +160,30 @@ test('grounded answers stay with their question when the model leaves one out', 
   const keyed = applyGrounding(state, asked, `{"answers": {"1": ${confirm}}}`)
   expect(keyed.added[0]?.answers).toEqual(homepage.answers)
   expect(keyed.next[0]?.answers[0]?.risk).toBe('commitment')
+})
+
+test('the live task is about the questions I have to answer, and offers a safe answer before a promise', async () => {
+  const t = task('x', 'en', 'Alex Example')
+  expect(t).toContain('I am the person this pane is for: Alex Example.')
+  expect(t).toContain('Leave out questions to someone else about their own work.')
+  expect(t).toContain('questions I will most likely have to answer next')
+  expect(t.indexOf('"vague": true and binding us to nothing')).toBeLessThan(t.indexOf('"commitment": only when the question asks'))
+  expect(task('x')).toContain('I am the person this pane is for.')
+})
+
+test('my last commits: name and email from git, one fact per commit with its source; anything else is nothing', async () => {
+  expect(parseIdent('Alex Example <alex@example.com> 1760000000 +0200')).toEqual({ name: 'Alex Example', email: 'alex@example.com' })
+  expect(parseIdent('fatal: not a git repository')).toBeNull()
+  expect(logArgs('alex@example.com')).toContain('--author=alex@example.com')
+  expect(logArgs('alex@example.com')).toContain('--no-merges')
+  expect(parseLog('abc1234\t2026-10-14\tFix the publish rule\n\nnot a commit')).toEqual([{ text: 'Fix the publish rule', source: 'commit abc1234, 2026-10-14' }])
+  expect(parseLog(null)).toEqual([])
+})
+
+test('recent work comes from the prepared set when it has some, else from listening, and the model sees it', async () => {
+  const live = { ...IDLE, recent: [{ text: 'Fix the publish rule', source: 'commit abc1234, 2026-10-14' }] }
+  expect(recentOf(SET, live)).toEqual(live.recent)
+  const prepared = { ...SET, recent: [{ text: 'Tested 7822 on Q', source: 'PROJ-7822' }] }
+  expect(recentOf(prepared, live)).toEqual(prepared.recent)
+  expect(knowledge(null, live)).toContain('- Fix the publish rule (source: commit abc1234, 2026-10-14)')
 })

@@ -1,6 +1,6 @@
-import type { Answer, Lang, Live, Question, QuestionSet, Risk } from '../types'
+import type { Answer, Fact, Lang, Live, Question, QuestionSet, Risk } from '../types'
 
-export const IDLE: Live = { isOn: false, status: '', meeting: null, lines: 0, changedAt: 0, asked: [], current: null, added: [], next: [], deep: {}, looking: [] }
+export const IDLE: Live = { isOn: false, status: '', meeting: null, lines: 0, changedAt: 0, asked: [], current: null, added: [], next: [], deep: {}, looking: [], recent: [] }
 
 const RISKS: readonly Risk[] = ['sourced', 'commitment', 'vague', 'risky']
 // Risk classes as stored by 0.8 and earlier, which used German names.
@@ -10,9 +10,12 @@ const OLD_RISKS: Record<string, Risk> = { belegt: 'sourced', zusage: 'commitment
 export const asRisk = (risk: unknown): Risk =>
   RISKS.includes(risk as Risk) ? (risk as Risk) : (OLD_RISKS[String(risk)] ?? 'vague')
 
-/** Questions from state an older version wrote: their risk classes in today's names. */
-export const withRisks = (list: Question[]): Question[] =>
-  list.map(q => ({ ...q, answers: q.answers.map(a => ({ ...a, risk: asRisk(a.risk) })) }))
+/** Questions from state an older version wrote: their risk classes in today's names, their notes and sources text or nothing. */
+export const withRisks = (list: Question[]): Question[] => list.map(q => ({ ...q, answers: toAnswers(q.answers) }))
+
+/** A model's free text as the pane draws it: a string, or nothing. An object drawn as text makes the engine refuse every redraw. */
+export const asText = (v: unknown) => (typeof v === 'string' ? v : undefined)
+
 const WINDOW_MS = 120_000
 const MAX_LINES = 60
 const MAX_NEXT = 5
@@ -71,7 +74,10 @@ export const isSameQuestion = (a: string, b: string) => {
 }
 
 export const SYSTEM =
-  'You are listening to a meeting in progress and help our team anticipate the other side\'s questions and answer them well. Reply with a JSON object only, no text before or after it.'
+  'You are listening to a meeting in progress and help me anticipate the questions I will have to answer, and answer them safely. Reply with a JSON object only, no text before or after it.'
+
+/** What I worked on last: what the prepared set says, else my latest commits found while listening. */
+export const recentOf = (set: QuestionSet | null, live: Live): Fact[] => (set?.recent?.length ? set.recent : (live.recent ?? []))
 
 export const knowledge = (set: QuestionSet | null, live: Live) =>
   [
@@ -87,6 +93,9 @@ export const knowledge = (set: QuestionSet | null, live: Live) =>
     '',
     'Questions already asked in the meeting that are not in the set:',
     ...(live.added.length ? live.added.map(q => `- ${q.question}`) : ['- none']),
+    '',
+    'What I worked on most recently, each certainly true:',
+    ...recentOf(set, live).map(f => `- ${f.text}${f.source ? ` (source: ${f.source})` : ''}`),
   ].join('\n')
 
 /** Questions and answers in the meeting's language; who, why and notes stay English for the team. */
@@ -97,25 +106,37 @@ export const languageRule = (lang: Lang) =>
       ? 'Write "question" and the answer "text"s in English.'
       : 'Write "question" and the answer "text"s in the language the meeting is held in.'
 
-export const task = (tail: string, lang: Lang = 'auto') => `The last two minutes of the transcript. "Call" is audio from the video call (the other side), "Mic" is this computer's microphone: our team, but in an on-site meeting everyone in the room. Decide who asks from the content, not from the label alone.
+/**
+ * The answer options every live prompt asks for, safest first: one that is true and binds us to nothing always comes,
+ * a promise only when the question asks for one. `sourced` says what counts as a source in that prompt.
+ */
+const answerRules = (sourced: string) => `- "sourced": ${sourced}
+- "vague": true and binding us to nothing: what we know, what is still open. When nothing is sourced, the first option is this one.
+- "commitment": only when the question asks for a date, an owner or a scope; never a date, name or promise nobody gave in the meeting or the material.
+- "risky": at most one, as a warning of what not to say.
+Every option but "sourced" has a "note".`
+
+export const task = (tail: string, lang: Lang = 'auto', me = '') => `The last two minutes of the transcript. I am the person this pane is for${me ? `: ${me}` : ''}. "Mic" is this computer's microphone: me in a video call, everyone in the room in an on-site meeting. "Call" is audio from the video call: everyone else. Decide who asks whom from the content, not from the label alone.
 ${tail}
 
 Task:
 1. "asked": numbers of the questions from the question set that were asked, in substance, in this excerpt.
-2. "new": questions asked in this excerpt that are neither in the question set nor among those already asked (at most 3).
-3. "current": the most recently asked question that is being answered or still open: {"set": number}, {"new": index in "new"} or null.
-4. "next": 2 to 3 questions the other side is most likely to ask next, given how the conversation is going, also outside the set.
+2. "new": questions asked in this excerpt that I have to answer or should be ready to answer (asked of me or of everyone, or about something I work on), neither in the question set nor among those already asked (at most 3). Leave out questions to someone else about their own work.
+3. "current": the most recently asked of those questions that is being answered or still open: {"set": number}, {"new": index in "new"} or null.
+4. "next": 2 to 3 questions I will most likely have to answer next, given how the conversation is going and what I worked on recently, also outside the set.
 5. For every question in "new" and "next": "search", 2 to 4 distinctive words likely to appear in our repository where the answer would be written (product and component names, file names, figures), in the language the repository is most likely written in.
 Language: ${languageRule(lang)} "why" and "note" in English.
-For every question in "new" and "next": relevance and confidence (1 to 5), "why" (short, tied to the conversation) and 2 to 3 answer options with "risk": "sourced" only when the answer is in the question set in substance (then "source" as there); otherwise "vague", "commitment" or "risky", each with a "note".
+For every question in "new" and "next": "relevance" (1 to 5, how likely I am the one to answer it), "confidence" (1 to 5, how well the material above supports a sourced answer), "why" (short, tied to the conversation) and 2 to 3 answer options, safest first, each with "risk":
+${answerRules('only when the question set or my recent work carries the answer in substance; then "source" as there.')}
 Format: {"asked": [], "new": [], "current": null, "next": [{"question": "", "relevance": 3, "confidence": 2, "why": "", "search": [""], "answers": [{"text": "", "risk": "vague", "note": ""}]}]}`
 
 const clamp = (n: unknown) => Math.min(5, Math.max(1, Math.round(Number(n) || 1)))
 
-const toAnswers = (raw: unknown): Answer[] =>
+/** Answer options from a model reply, a prepared set or older state; every caller's answers pass here before they are drawn. */
+export const toAnswers = (raw: unknown): Answer[] =>
   (Array.isArray(raw) ? (raw as Answer[]) : [])
     .filter(a => typeof a?.text === 'string')
-    .map(a => ({ text: a.text, risk: asRisk(a.risk), note: a.note, source: a.source }))
+    .map(a => ({ text: a.text, risk: asRisk(a.risk), note: asText(a.note), source: asText(a.source) }))
 
 const toQuestions = (raw: unknown, limit: number): Question[] =>
   (Array.isArray(raw) ? (raw as Question[]) : [])
@@ -125,7 +146,7 @@ const toQuestions = (raw: unknown, limit: number): Question[] =>
       question: q.question,
       relevance: clamp(q.relevance),
       confidence: clamp(q.confidence),
-      why: typeof q.why === 'string' ? q.why : undefined,
+      why: asText(q.why),
       search: Array.isArray(q.search) ? q.search.filter(t => typeof t === 'string' && t.trim()).slice(0, 4) : undefined,
       answers: toAnswers(q.answers),
     }))
@@ -205,7 +226,8 @@ export const ground = (items: readonly { question: string; hits: string[] }[], l
 
 ${items.map((it, i) => `${i}: ${it.question}\n${it.hits.join('\n')}`).join('\n\n')}
 
-For every question, 2 to 3 answer options, each with "risk": "sourced" only when the lines above carry the answer, then "source" is the path:line it rests on; otherwise "vague", "commitment" or "risky", each with a "note".
+For every question, 2 to 3 answer options, safest first, each with "risk":
+${answerRules('only when the lines above carry the answer; "source" is the path:line it rests on.')}
 Language: ${languageRule(lang)} "note" in English.
 Format: {"answers": {"0": [{"text": "", "risk": "sourced", "source": "path:12", "note": ""}]}}, keyed by the question's number; leave out a question you cannot answer.`
 
@@ -234,7 +256,9 @@ export const applyGrounding = (live: Live, questions: readonly string[], reply: 
 /** The task for a read-only subagent that looks a question up in the repository while the meeting goes on. */
 export const lookupPrompt = (question: string, lang: Lang) => `Someone in a meeting just asked us: "${question}"
 Find the answer in this repository: search with Grep and Glob, then read what you find. Change nothing.
-Reply with a JSON object only: {"answers": [{"text": "", "risk": "sourced", "source": "path:line", "note": ""}]} with 1 to 3 answers. "sourced" only for an answer a file you read carries, with its path and line; otherwise "vague", "commitment" or "risky", each with a "note". ${languageRule(lang)} "note" in English.`
+Reply with a JSON object only: {"answers": [{"text": "", "risk": "sourced", "source": "path:line", "note": ""}]} with 1 to 3 answers, safest first, each with "risk":
+${answerRules('only for an answer a file you read carries; "source" is its path:line.')}
+${languageRule(lang)} "note" in English.`
 
 /** The answers in a subagent's reply; nothing when it is not the asked-for JSON. */
 export const parseAnswers = (reply: string): Answer[] => {
@@ -254,6 +278,22 @@ export const settleLookup = (live: Live, question: string, reply: string | null)
     deep: answers.length ? { ...live.deep, [question]: answers } : live.deep,
   }
 }
+
+/** Name and email from `git var GIT_AUTHOR_IDENT`; null when the output is not that. */
+export const parseIdent = (out: string | null) => {
+  const m = /^(.+?) <([^>]+)>/.exec(out ?? '')
+  return m ? { name: m[1]!, email: m[2]! } : null
+}
+
+/** My last five commits on any branch, merges left out: what I worked on last, whatever the meeting asks. */
+export const logArgs = (email: string) => ['log', '--branches', '--remotes', '--no-merges', '-F', `--author=${email}`, '-n', '5', '--format=%h%x09%as%x09%s']
+
+export const parseLog = (out: string | null): Fact[] =>
+  (out ?? '')
+    .split('\n')
+    .map(line => line.split('\t'))
+    .filter(p => p.length >= 3 && p.slice(2).join('\t').trim())
+    .map(([sha, date, ...subject]) => ({ text: subject.join('\t').trim(), source: `commit ${sha}, ${date}` }))
 
 /** GitHub's https address of a repository from its origin remote; null for any other remote. */
 export const githubBase = (remote: string | null) => {
