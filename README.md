@@ -51,7 +51,7 @@ Listening along: the question just asked moves to **ASKED NOW** with answers by 
 
 While a question is open, new ones wait behind a button instead of moving the list:
 
-![A held live list: the question asked now, my recent work and a button to take two new questions](docs/live-hold.png)
+![A held live list: the question asked now, my recent work, a button to take three new questions and the open question that holds the list](docs/live-hold.png)
 
 *Screenshots show a fictional pitch for a fictional company; no real meeting was recorded.*
 
