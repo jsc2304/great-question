@@ -6,11 +6,11 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-d97757)](#requirements)
 
-A side panel for Claude Code. Before a pitch, a customer meeting or the daily stand-up, it reads your repository, your tickets and, with Wispr Flow, earlier meetings, and shows the questions most likely to come up, each with answers ranked by risk and the source they rest on.
+A side panel for Claude Code. Before a pitch, a customer meeting or the daily stand-up, it reads your repository, your tickets and, with Wispr Flow, earlier meetings, and shows the questions most likely to come up, each with answers ranked by risk and the source they rest on. During the meeting it listens along and predicts live which questions come next, with their answers ready before anyone asks.
 
 - **Prepare any meeting** with one command: likely questions, who asks them and why, and answers with their sources. No Wispr Flow needed.
 - **Answer safely:** every answer is marked *say it*, *weak*, *only if covered* or *don't say*, and the panel always offers something that is true and promises nothing, from what you worked on last.
-- **Listen along** during the meeting with [Wispr Flow](https://wisprflow.ai) (macOS): the question just asked jumps to the top with its answers, and the next likely questions follow.
+- **Predict questions live** during the meeting with [Wispr Flow](https://wisprflow.ai) (macOS): the question just asked jumps to the top with its answers, looked up in your repository, and the questions likely to come next appear with their answers before they are asked.
 
 ## Quick start
 
