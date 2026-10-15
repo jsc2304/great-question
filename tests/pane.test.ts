@@ -542,3 +542,33 @@ test('a reply cut short or not JSON leaves the lines unread: the status says so 
   expect(await ui.find({ text: /last utterance 0 s ago/ })).toBeDefined()
   await ui.unmount()
 })
+
+test('the Model button sets who answers live and how hard it thinks', async ($, on) => {
+  const clock = bottoms(on)
+  const asked: { model: string; effort?: string; timeoutMs?: number }[] = []
+  const spawned: { model?: string; effort?: unknown }[] = []
+  mock.env(on, { HOME: '/h' })
+  on('fs.list', () => ({ value: [{ kind: 'dir', name: 'm1' }] }) as never)
+  on('fs.exists', () => ({ value: true }) as never)
+  on('fs.stat', () => ({ value: { mtimeMs: clock.now() } }) as never)
+  let lines = 0
+  on('fs.read', ($, e) => ({ value: e.path.endsWith('live.ndjson') ? Array.from({ length: lines }, (_, i) => JSON.stringify({ text: `S ${i}`, endRecordingMs: i })).join('\n') : '' }) as never)
+  on('model.complete', ($, e) => (asked.push({ model: e.model, effort: e.effort, timeoutMs: e.timeoutMs }), { value: { isAnswered: true, text: JSON.stringify({ new: [{ question: 'How do we deploy?', answers: [] }], current: { new: 0 } }), usage: {} } }) as never)
+  on('process.run', () => ({ value: { exitCode: 1, stdout: '', stderr: '' } }) as never)
+  on('agent.spawn', ($, e) => (spawned.push({ model: e.model, effort: e.effort }), { model: 'x' }) as never)
+  await $.session.start({ cwd: '/repo' } as never)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'more' })
+  expect(await ui.find({ key: 'quality', text: /Model: Fast \(Haiku\)/ })).toBeDefined()
+  await ui.press({ key: 'quality' })
+  await ui.press({ key: 'quality' })
+  expect(await ui.find({ key: 'quality', text: /Model: Thorough \(Sonnet, high\)/ })).toBeDefined()
+  await ui.press({ key: 'ear' })
+  lines = 1
+  await clock.advance(20_000)
+  expect(asked[0]).toEqual({ model: 'sonnet', effort: 'high', timeoutMs: 90_000 })
+  expect(spawned[0]?.model).toBe('sonnet')
+  await ui.press({ key: 'quality' })
+  expect(await ui.find({ key: 'quality', text: /Model: Fast/ })).toBeDefined()
+  await ui.unmount()
+})

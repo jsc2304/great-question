@@ -2,6 +2,14 @@
 
 Versions follow semantic versioning. Newest release first.
 
+## 0.12.0 — 2026-10-15
+
+**Update the mod and run `/reload-plugins`; nothing else to do. The default stays Fast (Haiku).**
+
+### Added
+
+- **Model** under **View**: *Fast (Haiku)*, *Balanced (Sonnet, low effort)* or *Thorough (Sonnet, high effort)* for listening along, switchable mid-meeting. It sets the model and effort of the live step and of the answers from the repository, and the model of the lookup for the question asked now. Slower levels answer later; their time limit grows to 45 and 90 seconds.
+
 ## 0.11.2 — 2026-10-15
 
 **Update the mod and run `/reload-plugins`; nothing else to do.**

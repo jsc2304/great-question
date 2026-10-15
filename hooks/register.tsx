@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Answer, Fact, Lang, Live, Question, QuestionSet, Risk, Source, SourceKind } from '../types'
+import type { Answer, Fact, Lang, Quality, Live, Question, QuestionSet, Risk, Source, SourceKind } from '../types'
 import {
   GROUND_SYSTEM,
   IDLE,
@@ -55,8 +55,17 @@ const version = atom({ plugin: 'great-question', key: 'version' } as const, '')
 const LISTEN_MS = 20_000
 // A recording counts as running while Wispr wrote its live transcript this recently.
 const FRESH_MS = 3 * 60_000
+const quality = atom({ plugin: 'great-question', key: 'quality' } as const, 'fast')
+// Who answers live and how hard it thinks. A slower level answers later: a step still running when the next is due skips it.
 // A completion has no time limit of its own: one that never answered held the listening step, and every later one, for good.
-const MODEL_MS = 30_000
+const QUALITY: Record<Quality, { label: string; model: string; effort?: 'low' | 'high'; timeoutMs: number }> = {
+  fast: { label: 'Fast (Haiku)', model: 'haiku', timeoutMs: 30_000 },
+  balanced: { label: 'Balanced (Sonnet, low)', model: 'sonnet', effort: 'low', timeoutMs: 45_000 },
+  thorough: { label: 'Thorough (Sonnet, high)', model: 'sonnet', effort: 'high', timeoutMs: 90_000 },
+}
+const QUALITIES = Object.keys(QUALITY) as Quality[]
+// Reads that come from an older version or a hand edit fall back to the fast level.
+const levelOf = async ($: EngineInterface) => QUALITY[await read($, quality)] ?? QUALITY.fast
 
 // Display order: safest first, so the answer to give leads and the warning closes. A thin answer that binds us to
 // nothing comes before a promise: a closed row's one-line answer is never a commitment while a safer one exists.
@@ -421,8 +430,10 @@ const lookUp = async ($: EngineInterface, question: string, set: QuestionSet | n
   const prepared = set?.questions.find(q => q.question === question)
   if (prepared && confidenceOf(prepared) >= 4) return
   if (ear.looking.includes(question) || ear.deep[question]) return
+  // ponytail: spawn takes a model but no effort; a registered agent type per level if the lookup needs more thought
+  const { model } = await levelOf($)
   const spawned = await $.agent
-    .spawn({ prompt: lookupPrompt(question, await read($, lang)), description: 'Great Question: repository lookup', subagentType: 'Explore', model: 'haiku' })
+    .spawn({ prompt: lookupPrompt(question, await read($, lang)), description: 'Great Question: repository lookup', subagentType: 'Explore', model })
     .catch(() => null)
   if (!spawned || !('agentId' in spawned) || !spawned.agentId) return
   lookups.set(spawned.agentId, question)
@@ -450,14 +461,16 @@ const listen = async ($: EngineInterface) => {
     return
   }
   const me = await myWork($, set?.folder ?? (await $.session.cwd()))
-  // ponytail: haiku, whole tail every 20 s while lines grow; a cheaper diff-only prompt if cost matters
+  const { model, effort, timeoutMs } = await levelOf($)
+  // ponytail: whole tail every 20 s while lines grow; a cheaper diff-only prompt if cost matters
   const reply = await $.model.complete({
-    model: 'haiku',
+    model,
+    effort,
     system: SYSTEM,
     prompt: [{ text: knowledge(set, { ...base, recent: me.recent }), cache: true }, { text: task(tail, await read($, lang), me.name) }],
     // Up to six questions with three answers each: 2000 tokens cut the JSON short, and a cut reply changes nothing.
     maxTokens: 4000,
-    timeoutMs: MODEL_MS,
+    timeoutMs,
   })
   if (!reply.isAnswered) {
     await update($, live, l => ({ ...l, status: `model gave no answer (${reply.reason})` }))
@@ -475,7 +488,7 @@ const listen = async ($: EngineInterface) => {
   const fresh = [...step.added.filter(q => isNew(q, base.added)), ...step.next.filter(q => isNew(q, base.next))].filter(q => q.search?.length)
   const items = (await Promise.all(fresh.map(async q => ({ question: q.question, hits: await repoHits($, q.search!) })))).filter(it => it.hits.length)
   if (items.length) {
-    const grounded = await $.model.complete({ model: 'haiku', system: GROUND_SYSTEM, prompt: [{ text: ground(items, await read($, lang)) }], maxTokens: 2000, timeoutMs: MODEL_MS })
+    const grounded = await $.model.complete({ model, effort, system: GROUND_SYSTEM, prompt: [{ text: ground(items, await read($, lang)) }], maxTokens: 2000, timeoutMs })
     if (grounded.isAnswered) step = applyGrounding(step, items.map(it => it.question), grounded.text)
   }
   // Keep what a lookup finished or started meanwhile; this step does not know about it.
@@ -706,6 +719,7 @@ export const register: Register = on => {
     const isPractice = (await read($, view)) === 'practice'
     const isByLikely = (await read($, sortBy)) === 'likelihood'
     const language = await read($, lang)
+    const level = await read($, quality)
     // Spread over IDLE: a value from an older version of the mod may lack newer fields.
     const ear: Live = { ...IDLE, ...(await read($, live)) }
     const shown = await read($, version)
@@ -866,6 +880,11 @@ export const register: Register = on => {
                 key="lang"
                 label={`Language: ${language === 'auto' ? 'Auto' : language.toUpperCase()}`}
                 onPress={() => update($, lang, l => LANGS[(LANGS.indexOf(l) + 1) % LANGS.length]!)}
+              />
+              <Button
+                key="quality"
+                label={`Model: ${QUALITY[level]?.label ?? QUALITY.fast.label}`}
+                onPress={() => update($, quality, q => QUALITIES[(QUALITIES.indexOf(q) + 1) % QUALITIES.length]!)}
               />
               <Button
                 key="sort"
