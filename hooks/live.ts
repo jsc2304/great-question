@@ -20,6 +20,9 @@ const WINDOW_MS = 120_000
 const MAX_LINES = 60
 const MAX_NEXT = 5
 
+// A line without a source is nobody in particular: labelled Mic, every question in it read as mine and was left out.
+const SPEAKERS: Record<string, string> = { system: 'Call', mic: 'Mic' }
+
 type Utterance = { text?: string; timestamp?: string; endRecordingMs?: number; speaker?: { source?: string } }
 
 /**
@@ -43,7 +46,7 @@ export const parseTranscript = (ndjson: string) => {
   return {
     lines: rows.length,
     tail: recent
-      .map(u => `[${u.timestamp ?? ''}] ${u.speaker?.source === 'system' ? 'Call' : 'Mic'}: ${u.text}`)
+      .map(u => `[${u.timestamp ?? ''}] ${SPEAKERS[u.speaker?.source ?? ''] ?? 'Unknown'}: ${u.text}`)
       .join('\n'),
   }
 }
@@ -114,15 +117,16 @@ const answerRules = (sourced: string) => `- "sourced": ${sourced}
 - "vague": true and binding us to nothing: what we know, what is still open. When nothing is sourced, the first option is this one.
 - "commitment": only when the question asks for a date, an owner or a scope; never a date, name or promise nobody gave in the meeting or the material.
 - "risky": at most one, as a warning of what not to say.
+Only a "commitment" may promise anything: no "I will send …", "we will check …" or date in any other option.
 Every option but "sourced" has a "note".`
 
-export const task = (tail: string, lang: Lang = 'auto', me = '') => `The last two minutes of the transcript. I am the person this pane is for${me ? `: ${me}` : ''}. "Mic" is this computer's microphone: me in a video call, everyone in the room in an on-site meeting. "Call" is audio from the video call: everyone else. Decide who asks whom from the content, not from the label alone.
+export const task = (tail: string, lang: Lang = 'auto', me = '') => `The last two minutes of the transcript. I am the person this pane is for${me ? `: ${me}` : ''}. "Mic" is this computer's microphone: me in a video call, everyone in the room in an on-site meeting. "Call" is audio from the video call: everyone else. "Unknown" is anyone. Decide who asks whom from the content, not from the label alone.
 ${tail}
 
 Task:
 1. "asked": numbers of the questions from the question set that were asked, in substance, in this excerpt.
-2. "new": questions asked in this excerpt that I have to answer or should be ready to answer (asked of me or of everyone, or about something I work on), neither in the question set nor among those already asked (at most 3). Leave out questions to someone else about their own work.
-3. "current": the most recently asked of those questions that is being answered or still open: {"set": number}, {"new": index in "new"} or null.
+2. "new": questions asked in this excerpt that I have to answer or should be ready to answer (asked of me or of everyone, or about something I work on), neither in the question set nor among those already asked (at most 3). A question to "you", to your team or to a role such as the project lead is asked of me. Leave out only questions addressed by name to someone else about their own work.
+3. "current": the question from the set or from "new" that was asked last in this excerpt: {"set": number} or {"new": index in "new"}; null only when the excerpt asks none.
 4. "next": 2 to 3 questions I will most likely have to answer next, given how the conversation is going and what I worked on recently, also outside the set.
 5. For every question in "new" and "next": "search", 2 to 4 distinctive words likely to appear in our repository where the answer would be written (product and component names, file names, figures), in the language the repository is most likely written in.
 Language: ${languageRule(lang)} "why" and "note" in English.
@@ -182,7 +186,9 @@ export const applyReply = (live: Live, set: QuestionSet | null, reply: string): 
     (pick && typeof pick.set === 'number' && questions[pick.set]?.question) ||
     (pick && typeof pick.new === 'number' && fresh[pick.new]?.question) ||
     null
-  const current = picked ? asListed(picked) : live.current
+  // Without a usable pick, the question this reply saw asked last stands in: keeping the old one left it on screen for good.
+  const seen = [...added.slice(live.added.length).map(q => q.question), ...[...asked].filter(q => !live.asked.includes(q))].at(-1)
+  const current = picked ? asListed(picked) : (seen ?? live.current)
   if (current) asked.add(current)
 
   // Predictions stay until asked; new ones join at the end, and past MAX_NEXT the oldest not predicted again goes.

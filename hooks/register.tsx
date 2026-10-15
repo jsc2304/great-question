@@ -444,7 +444,7 @@ const listen = async ($: EngineInterface) => {
   const { lines, tail } = parseTranscript((await $.fs.read(path)) as string)
   const base = state.meeting === path ? state : { ...IDLE, isOn: true, meeting: path }
   // Written every step, so the age in the status line stays true while nobody speaks.
-  const reading = (l: Live) => `listening · ${lines} utterances · last new ${age(now - (l.changedAt || now))} ago`
+  const reading = (l: Live) => `listening · ${lines} utterances · last utterance ${age(now - (l.changedAt || now))} ago`
   if (lines === base.lines) {
     await update($, live, l => (l.isOn ? { ...l, status: reading(l) } : l))
     return
@@ -455,14 +455,21 @@ const listen = async ($: EngineInterface) => {
     model: 'haiku',
     system: SYSTEM,
     prompt: [{ text: knowledge(set, { ...base, recent: me.recent }), cache: true }, { text: task(tail, await read($, lang), me.name) }],
-    maxTokens: 2000,
+    // Up to six questions with three answers each: 2000 tokens cut the JSON short, and a cut reply changes nothing.
+    maxTokens: 4000,
     timeoutMs: MODEL_MS,
   })
   if (!reply.isAnswered) {
     await update($, live, l => ({ ...l, status: `model gave no answer (${reply.reason})` }))
     return
   }
-  let step = { ...applyReply(base, set, reply.text), lines, changedAt: now, recent: me.recent }
+  const applied = applyReply(base, set, reply.text)
+  // Not the asked-for JSON: the lines stay unread, so the next step tries them again.
+  if (applied === base) {
+    await update($, live, l => ({ ...l, status: 'model reply was no JSON; trying again' }))
+    return
+  }
+  let step = { ...applied, lines, changedAt: now, recent: me.recent }
   // New questions from this step: look their words up in the repository and let the model answer from the lines found.
   const isNew = (q: Question, before: Question[]) => !before.some(b => b.question === q.question)
   const fresh = [...step.added.filter(q => isNew(q, base.added)), ...step.next.filter(q => isNew(q, base.next))].filter(q => q.search?.length)

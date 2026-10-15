@@ -2,6 +2,22 @@
 
 Versions follow semantic versioning. Newest release first.
 
+## 0.11.2 — 2026-10-15
+
+**Update the mod and run `/reload-plugins`; nothing else to do.**
+
+### Fixed
+
+- **ASKED NOW** follows the meeting. When the model named no current question, the first one stayed on show for good; now the question asked last in the new lines takes its place.
+- A model reply that was cut short or was no JSON changed nothing, and its lines counted as read, so their questions never came. The reply may now be twice as long, and a failed one is tried again on the next step; the status says so.
+- Questions to "you", to your team or to a role such as the project lead count as yours, so they show as new questions and predictions. Before, they were often left out as meant for someone else.
+- A transcript line without a speaker no longer counts as your own microphone.
+- Only answers marked as a commitment may promise anything; a safe answer such as SAY IT no longer offers to send something after the meeting.
+
+### Changed
+
+- The status reads "last utterance … ago" instead of "last new … ago": it counts from the last line of the transcript, not from the last new question.
+
 ## 0.11.1 — 2026-10-15
 
 **Update the mod and run `/reload-plugins`; nothing else to do.**

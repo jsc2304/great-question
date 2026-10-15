@@ -211,7 +211,7 @@ test('while a row is open the live rows stand still; new ones wait behind take n
   await step({ next: [guess('Why Google?')] })
   expect(await ui.find({ key: T('Why Google?') })).toBeUndefined()
   expect(await ui.find({ key: 'sync', text: /take 1 new/ })).toBeDefined()
-  expect(await ui.find({ text: /listening · 1 utterances · last new 0 s ago/ })).toBeDefined()
+  expect(await ui.find({ text: /listening · 1 utterances · last utterance 0 s ago/ })).toBeDefined()
   await ui.press({ key: 'sync' })
   // In, closed, its best answer on one line; the open question stays open.
   expect(await ui.find({ key: T('Why Google?') })).toBeDefined()
@@ -229,7 +229,7 @@ test('while a row is open the live rows stand still; new ones wait behind take n
 
   // Nobody speaks: the status says how long ago the transcript last grew.
   await step()
-  expect(await ui.find({ text: /last new 20 s ago/ })).toBeDefined()
+  expect(await ui.find({ text: /last utterance 20 s ago/ })).toBeDefined()
 
   // An asked question keeps its place while listening, marked ✓; paused, it moves to the end.
   await step({ asked: [1], current: { set: 1 } })
@@ -516,5 +516,29 @@ test('prepared questions carry what I worked on last; the pane shows it without 
   await $.tool.call({ tool: 'mcp__great-question__show_questions', ...SET, recent: set?.recent })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ text: '● Tested the fix on Q' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a reply cut short or not JSON leaves the lines unread: the status says so and the next step tries them again', async ($, on) => {
+  const clock = bottoms(on)
+  const replies = ['{"new": [{"question": "Which payment methods at launch?", "answers": [{"text": "Card', JSON.stringify({ new: [guess('Which payment methods at launch?')], current: { new: 0 } })]
+  const limits: number[] = []
+  mock.env(on, { HOME: '/h' })
+  on('fs.list', () => ({ value: [{ kind: 'dir', name: 'm1' }] }) as never)
+  on('fs.exists', () => ({ value: true }) as never)
+  on('fs.stat', () => ({ value: { mtimeMs: clock.now() } }) as never)
+  on('fs.read', ($, e) => ({ value: e.path.endsWith('live.ndjson') ? JSON.stringify({ text: 'Which payment methods at launch?', endRecordingMs: 1 }) : '' }) as never)
+  on('model.complete', ($, e) => (limits.push(e.maxTokens ?? 0), { value: { isAnswered: true, text: replies.shift() ?? '{}', usage: {} } }) as never)
+  on('agent.spawn', () => ({ model: 'haiku' }) as never)
+  await $.session.start({ cwd: '/repo' } as never)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'ear' })
+  await clock.advance(20_000)
+  expect(await ui.find({ text: 'model reply was no JSON; trying again' })).toBeDefined()
+  expect(limits[0]).toBeGreaterThan(2000)
+  // The transcript has not grown, yet the step runs again and the question arrives.
+  await clock.advance(20_000)
+  expect(await ui.find({ text: 'Which payment methods at launch?' })).toBeDefined()
+  expect(await ui.find({ text: /last utterance 0 s ago/ })).toBeDefined()
   await ui.unmount()
 })
