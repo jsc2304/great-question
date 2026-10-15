@@ -15,21 +15,21 @@ Every answer carries its risk as a mark, a word and a colour, safest first:
 
 ## What it looks like
 
-A pitch prepared: questions grouped by how surely they can be answered, each with its risk marks. An opened question says who is likely to ask, why, who answers on our side, and offers answers by risk, with their sources:
+A pitch prepared: what you worked on last as safe to say, then questions grouped by how surely they can be answered, each with its risk marks. An opened question says who is likely to ask, why, who answers on our side, and offers answers by risk, with their sources:
 
-![The Great Question panel: questions grouped by answer confidence, one opened with a sourced answer and a warning what not to say](docs/overview.png)
+![The Great Question panel: safe to say from my recent work, questions grouped by answer confidence, one opened with a sourced answer and a warning what not to say](docs/overview.png)
 
-Where the documents give no firm answer, the panel says what you may promise only if it is covered, what is harmless but shallow, and what to leave out:
+Where the documents give no firm answer, the panel offers, safest first, what is harmless but shallow, what you may promise only if it is covered, and what to leave out:
 
-![An unsure question with three kinds of answer: only if covered, weak, don't say](docs/answer-risks.png)
+![An unsure question with three kinds of answer: weak, only if covered, don't say](docs/answer-risks.png)
 
-Listening along: the question just asked moves to **ASKED NOW** with answers by risk, and the next likely questions appear below, each with its best answer in one line:
+Listening along: the question just asked moves to **ASKED NOW** with answers by risk, your recent work stays on show as safe to say, and the next likely questions appear below, each with its safest answer in one line:
 
-![Listening: the question asked now with its answers and five likely next questions](docs/live.png)
+![Listening: the question asked now with its answers, my recent work, three likely next questions and the question asked but not prepared](docs/live.png)
 
 While a question is open, new ones wait behind a button instead of moving the list:
 
-![A held live list: the question asked now and a button to take four new questions](docs/live-hold.png)
+![A held live list: the question asked now, my recent work and a button to take two new questions](docs/live-hold.png)
 
 *Screenshots show a fictional pitch for a fictional company; no real meeting was recorded.*
 
