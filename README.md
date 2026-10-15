@@ -1,8 +1,30 @@
 # Great Question
 
-A side panel for Claude Code that shows the questions most likely to come up before a pitch, a customer meeting or the daily stand-up, with prepared answers ranked by risk. During a meeting it can listen along and keep suggesting the next questions.
+**Know the question before it is asked, and what you can safely say.**
 
-**Works best with Wispr Flow.** Listening along during a meeting, with the question just asked and the next likely questions and their answers, needs [Wispr Flow](https://wisprflow.ai). Without Wispr Flow, Great Question prepares meetings but does not listen.
+[![Release](https://img.shields.io/github/v/release/jsc2304/great-question)](https://github.com/jsc2304/great-question/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-d97757)](#requirements)
+
+A side panel for Claude Code. Before a pitch, a customer meeting or the daily stand-up, it reads your repository, your tickets and, with Wispr Flow, earlier meetings, and shows the questions most likely to come up, each with answers ranked by risk and the source they rest on.
+
+- **Prepare any meeting** with one command: likely questions, who asks them and why, and answers with their sources. No Wispr Flow needed.
+- **Answer safely:** every answer is marked *say it*, *weak*, *only if covered* or *don't say*, and the panel always offers something that is true and promises nothing, from what you worked on last.
+- **Listen along** during the meeting with [Wispr Flow](https://wisprflow.ai) (macOS): the question just asked jumps to the top with its answers, and the next likely questions follow.
+
+## Quick start
+
+```
+/plugin install great-question --marketplace jsc2304/great-question
+```
+
+Then, in the repository you work in:
+
+```
+/great-question-prep today's daily
+```
+
+The panel opens and the questions appear when the background agent is done. For a meeting, name it instead: `/great-question-prep customer pitch Thursday`. More under [Installation](#installation) and [Usage](#usage).
 
 Every answer carries its risk as a mark, a word and a colour, safest first:
 
@@ -121,7 +143,7 @@ What gets prepared depends on the project: with slides, a pitch preparation or a
 - **Record only with consent.** Wispr Flow records through this computer's microphone and system audio; no bot appears in the video call, so the others cannot see that it is being transcribed. Get the consent of everyone in the meeting before recording. In Germany, recording the privately spoken word without consent is a criminal offence (§ 201 StGB).
 - **Transcription by Wispr Flow.** Recording happens locally, transcription happens in Wispr Flow's cloud ([Wispr: on-device recording](https://wisprflow.ai/notetaker/what-is-on-device-recording), as of 14.10.2026). Great Question reads the finished transcript from the Wispr Flow app's local file.
 - **Prepared questions** are stored locally per project folder. They stay on the computer.
-- **Listening along** sends the last two minutes of the transcript, the prepared questions, the repository lines found for new questions, your git user name and your last five commit subjects to a small Claude model (Haiku), through the same access as the session. A lookup for the question asked now runs as a read-only subagent (Haiku) in the session's folder. Speaker names from Wispr Flow are not sent; names mentioned in the conversation are in the text.
+- **Listening along** sends the last two minutes of the transcript, the prepared questions, the repository lines found for new questions, your git user name and your last five commit subjects to a Claude model through the same access as the session: Haiku by default, Sonnet when chosen under **View → Model**. A lookup for the question asked now runs as a read-only subagent with the same model in the session's folder. Speaker names from Wispr Flow are not sent; names mentioned in the conversation are in the text.
 - **Exports** with live results contain questions from the conversation, names included. In projects with confidential content, add `question-sets/` to `.gitignore` or review it before committing.
 
 ## Development
@@ -144,6 +166,10 @@ A change reaches running sessions only with a new version: raise `version` in `.
 | `hooks/live.ts` | listening along: read the transcript, fold in the model's reply |
 | `types/index.d.ts` | data types and the panel's state |
 | `tests/` | tests for panel, export and listening along |
+
+## Feedback
+
+Questions, ideas and meeting stories go to [Discussions](https://github.com/jsc2304/great-question/discussions); bugs to [Issues](https://github.com/jsc2304/great-question/issues). If Great Question saved you in a meeting, a star helps others find it.
 
 ## License
 
