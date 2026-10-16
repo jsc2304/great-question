@@ -158,7 +158,7 @@ claude plugin validate .
 claude plugin test .
 ```
 
-A change reaches running sessions only with a new version: raise `version` in `.claude-plugin/plugin.json`, run `claude plugin update great-question@great-question`, restart the session. The desktop app loads the mod from the plugin cache, not from the working folder.
+A change reaches running sessions only with a release, since the mod installs from this repository on GitHub: raise `version` in `.claude-plugin/plugin.json` and add the `CHANGELOG.md` section in the same pull request, merge, tag `vX.Y.Z`, then run `claude plugin marketplace update great-question` and `claude plugin update great-question@great-question` and restart the session. The desktop app loads the mod from the plugin cache, not from the working folder, so unmerged work never reaches it; test it with `claude plugin test .`.
 
 | File | Contents |
 |---|---|
