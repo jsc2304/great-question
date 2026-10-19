@@ -521,7 +521,7 @@ const listen = async ($: EngineInterface) => {
   // The file's time is when the last line was written; written every tick, so the age stays true while nobody speaks.
   const reading = (l: Live) => {
     const left = l.pending.filter(q => !answering.has(q)).length
-    return `listening · ${total} utterances · last utterance ${age(now - mtimeMs)} ago${left ? ` · ${left} without answers, the next step tries again` : ''}`
+    return `listening · ${total} utterances · last utterance ${age(now - mtimeMs)} ago${left ? ` · ${left} unanswered` : ''}`
   }
   const folder = set?.folder ?? (await $.session.cwd())
   const me = fresh.length ? await myWorkNow($, folder, now) : { name: '', recent: [] }

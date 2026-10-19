@@ -398,7 +398,7 @@ test('a step paints the questions first, then their answers; one left out keeps 
   expect(after.phase).toBe('answering')
   // The answer step leaves the status line to the ticks; the next one says what still waits.
   await clock.advance(3_000)
-  expect(state().status).toContain('1 without answers, the next step tries again')
+  expect(state().status).toContain('1 unanswered')
 
   // The next step answers it again, and then all is ready.
   say('Okay, und wann geht das live?')
