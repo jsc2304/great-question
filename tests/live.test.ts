@@ -254,7 +254,8 @@ test('grounded answers stay with their question when the model leaves one out', 
 test('detecting is about the questions I have to answer; answering offers a safe answer before a promise', async () => {
   const t = detectTask('x', 'en', 'Alex Example')
   expect(t).toContain('I am the person this pane is for: Alex Example.')
-  expect(t).toContain('null only when the excerpt asks none')
+  expect(t).toContain('asked last in this excerpt and is for me or for everyone, never one for someone else')
+  expect(t).toContain('null when the excerpt asks none of those')
   expect(t).toContain('questions I will most likely have to answer next')
   expect(t).toContain('Lines marked ">" are new since the last look')
   expect(detectTask('x')).toContain('I am the person this pane is for.')
@@ -289,7 +290,7 @@ test('recent work comes from the prepared set when it has some, else from listen
  * A session that listens from the start to a running recording whose lines the test speaks, with files in the
  * folder, a git that knows me, and a model that answers from a queue.
  */
-const listening = async ($: Parameters<Parameters<typeof test>[1]>[0], on: On, files: Record<string, string> = {}) => {
+const listening = async ($: Parameters<Parameters<typeof test>[1]>[0], on: On, files: Record<string, string> = {}, holdAnswers = false) => {
   mock.store(on)
   const clock = mock.clock(on, { now: 1_000_000 })
   mock.env(on, { HOME: '/h' })
@@ -321,7 +322,16 @@ const listening = async ($: Parameters<Parameters<typeof test>[1]>[0], on: On, f
     meet.reads++
     return { value: said.map(text => JSON.stringify({ text, endRecordingMs: 1, speaker: { source: 'system' } })).join('\n') } as never
   })
-  on('model.complete', ($, e) => (prompts.push((e.promptBlocks ?? []) as { text: string; cache?: boolean }[]), seen.push(live), { value: { isAnswered: true, text: replies.shift() ?? '{}', usage: {} } }) as never)
+  // Answer calls can be held open, as a slow model keeps them, until the test lets them go.
+  let release = () => {}
+  const held = new Promise<void>(go => (release = go))
+  on('model.complete', async ($, e) => {
+    prompts.push((e.promptBlocks ?? []) as { text: string; cache?: boolean }[])
+    seen.push(live)
+    const text = replies.shift() ?? '{}'
+    if (holdAnswers && e.system?.startsWith('You answer questions')) await held
+    return { value: text === 'FAIL' ? { isAnswered: false, reason: 'overloaded' } : { isAnswered: true, text, usage: {} } } as never
+  })
   on('process.run', ($, e) => {
     const args = e.argv.join(' ')
     const out = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '' } }) as never
@@ -332,7 +342,7 @@ const listening = async ($: Parameters<Parameters<typeof test>[1]>[0], on: On, f
   await $.session.start({ cwd: '/repo' } as never)
   /** A line said in the call: the file grows and its time moves. */
   const say = (text: string) => (said.push(text), (meet.mtimeMs = clock.now()))
-  return { clock, say, replies, prompts, meet, seen, state: () => live }
+  return { clock, say, replies, prompts, meet, seen, release, state: () => live }
 }
 
 test('new lines without a trigger wait up to twelve seconds for a step; my name steps at once', async ($, on) => {
@@ -386,13 +396,16 @@ test('a step paints the questions first, then their answers; one left out keeps 
   expect(after.added[0]?.answers[0]?.text).toBe('It is on Q; PRE is still open')
   expect(after.pending).toEqual(['When does it go live?'])
   expect(after.phase).toBe('answering')
-  expect(after.status).toContain('1 without answers, the next step tries again')
+  // The answer step leaves the status line to the ticks; the next one says what still waits.
+  await clock.advance(3_000)
+  expect(state().status).toContain('1 without answers, the next step tries again')
 
   // The next step answers it again, and then all is ready.
   say('Okay, und wann geht das live?')
   replies.push('{"asked": [], "current": null}', '{"answers": {"0": [{"text": "Not dated yet", "risk": "vague", "note": "no date"}]}}')
   await clock.advance(3_000)
   expect(prompts[3]?.[1]?.text).toContain('0: When does it go live?')
+  expect(prompts[3]?.[1]?.text).not.toContain('Is the fix on PRE?')
   const done = state()
   expect(done.next[0]?.answers[0]?.text).toBe('Not dated yet')
   expect(done.pending).toEqual([])
@@ -435,4 +448,56 @@ test('a transcript whose file did not change is not read again', async ($, on) =
   say('One more?')
   await clock.advance(3_000)
   expect(meet.reads).toBe(2)
+})
+
+test('answers being written do not hold up the next question, and no question is answered twice at once', async ($, on) => {
+  const { clock, say, replies, prompts, release, state } = await listening($, on, {}, true)
+  say('Is the fix on PRE?')
+  replies.push(JSON.stringify({ new: [{ question: 'Is the fix on PRE?', to: 'me' }], current: { new: 0 } }), '{"answers": {"0": [{"text": "On Q, PRE open", "risk": "vague", "note": "thin"}]}}')
+  await clock.advance(3_000)
+  expect(prompts).toHaveLength(2)
+
+  say('And who tests it?')
+  replies.push(JSON.stringify({ new: [{ question: 'Who tests it?', to: 'all' }], current: { new: 0 } }), '{"answers": {"0": [{"text": "The trainers", "risk": "vague", "note": "check"}]}}')
+  await clock.advance(3_000)
+  // Detected while the first answers are still being written; the second answer call leaves the first question alone.
+  expect(prompts).toHaveLength(4)
+  expect(prompts[3]?.[1]?.text).toContain('0: Who tests it?')
+  expect(prompts[3]?.[1]?.text).not.toContain('Is the fix on PRE?')
+  expect(state().current).toBe('Who tests it?')
+  expect(state().phase).toBe('answering')
+
+  release()
+  await clock.advance(0)
+  expect(state().added.map(q => q.answers[0]?.text)).toEqual(['On Q, PRE open', 'The trainers'])
+  expect(state().pending).toEqual([])
+  expect(state().phase).toBe('ready')
+})
+
+test('a failed step waits six seconds before the same lines try again', async ($, on) => {
+  const { clock, say, replies, prompts, state } = await listening($, on)
+  say('Is the fix on PRE?')
+  replies.push('FAIL')
+  await clock.advance(3_000)
+  expect(prompts).toHaveLength(1)
+  expect(state().status).toBe('model gave no answer (overloaded)')
+  await clock.advance(3_000)
+  expect(prompts).toHaveLength(1)
+  await clock.advance(3_000)
+  expect(prompts).toHaveLength(2)
+})
+
+test('a question for someone else lands in the list but does not take the place of mine', async () => {
+  const mine = applyReply({ ...IDLE, isOn: true }, null, JSON.stringify({ new: [{ question: 'Alex, is the fix on PRE?', to: 'me' }], current: { new: 0 } }), 1_000)
+  const other = applyReply(mine, null, JSON.stringify({ new: [{ question: 'Maciej, can you open 7810?', to: 'other' }], current: { new: 0 } }), 2_000)
+  expect(other.current).toBe('Alex, is the fix on PRE?')
+  expect(other.currentAt).toBe(1_000)
+  expect(other.added.map(q => q.question)).toEqual(['Alex, is the fix on PRE?', 'Maciej, can you open 7810?'])
+  // Without a pick, the last question for someone else does not stand in either.
+  const unpicked = applyReply(mine, null, JSON.stringify({ new: [{ question: 'Maciej, and the PRE import?', to: 'other' }], current: null }), 3_000)
+  expect(unpicked.current).toBe('Alex, is the fix on PRE?')
+  // One for everyone does.
+  const all = applyReply(other, null, JSON.stringify({ new: [{ question: 'Does anyone have news on PRE?', to: 'all' }], current: { new: 0 } }), 4_000)
+  expect(all.current).toBe('Does anyone have news on PRE?')
+  expect(all.currentAt).toBe(4_000)
 })

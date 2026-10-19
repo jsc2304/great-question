@@ -159,7 +159,7 @@ Who a question is for:
 Task:
 1. "asked": numbers of the questions from the question set that were asked, in substance, in this excerpt.
 2. "new": questions asked in this excerpt, neither in the question set nor among those already asked (at most 3), whoever they are for.
-3. "current": the question from the set or from "new" that was asked last in this excerpt: {"set": number} or {"new": index in "new"}; null only when the excerpt asks none.
+3. "current": the question from the set or from "new" that was asked last in this excerpt and is for me or for everyone, never one for someone else: {"set": number} or {"new": index in "new"}; null when the excerpt asks none of those.
 4. "next": 2 to 3 questions I will most likely have to answer next, given how the conversation is going and what I worked on recently, also outside the set.
 For every question in "new" and "next":
 - "to": "me" (asked of me, by name, or about my ticket or my work), "all" (asked of everyone) or "other" (asked of someone else).
@@ -224,13 +224,13 @@ export const applyReply = (live: Live, set: QuestionSet | null, reply: string, n
   const pick = data.current
   // A new question matched to one already listed takes that row's wording, so it points at a row on screen.
   const asListed = (q: string) => [...questions, ...added].find(k => isSameQuestion(k.question, q))?.question ?? q
-  const picked =
-    (pick && typeof pick.set === 'number' && questions[pick.set]?.question) ||
-    (pick && typeof pick.new === 'number' && fresh[pick.new]?.question) ||
-    null
+  const fromSet = pick && typeof pick.set === 'number' ? questions[pick.set]?.question : undefined
+  const fromNew = !fromSet && pick && typeof pick.new === 'number' ? fresh[pick.new] : undefined
+  const picked = fromSet || fromNew?.question || null
   // Without a usable pick, the question this reply saw asked last stands in: keeping the old one left it on screen for good.
-  const seen = [...added.slice(live.added.length).map(q => q.question), ...[...asked].filter(q => !live.asked.includes(q))].at(-1)
-  const current = picked ? asListed(picked) : (seen ?? live.current)
+  const seen = [...added.slice(live.added.length).filter(q => q.to !== 'other').map(q => q.question), ...[...asked].filter(q => !live.asked.includes(q))].at(-1)
+  // A question for someone else never takes the place of the one I still have to answer.
+  const current = fromNew?.to === 'other' ? live.current : picked ? asListed(picked) : (seen ?? live.current)
   if (current) asked.add(current)
 
   // Predictions stay until asked; new ones join at the end, and past MAX_NEXT the oldest not predicted again goes.

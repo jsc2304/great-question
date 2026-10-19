@@ -548,8 +548,8 @@ test('a reply cut short or not JSON leaves the lines unread: the status says so 
   await ui.press({ key: 'ear' })
   await clock.advance(3_000)
   expect(await ui.find({ text: 'model reply was no JSON; trying again' })).toBeDefined()
-  // The transcript has not grown, yet the step runs again and the question arrives.
-  await clock.advance(3_000)
+  // The transcript has not grown, yet the step runs again after a short wait and the question arrives.
+  await clock.advance(6_000)
   expect(await ui.find({ text: 'Which payment methods at launch?' })).toBeDefined()
   // Finding questions is short; their answers get room for three options each.
   expect(limits).toEqual([700, 700, 1800])
