@@ -2,6 +2,27 @@
 
 Versions follow semantic versioning. Newest release first.
 
+## 0.13.0 — 2026-10-19
+
+**Update the mod and run `/reload-plugins`; nothing else to do.**
+
+### Added
+
+- A focus card for the question asked now: **ASKED OF YOU**, **ASKED · EVERYONE** or **ASKED NOW**, who asked and how long ago, the question in large type, the best answer with its source, one "✖ Don't say:" line, and the other answers behind "▸ N more answers".
+- Every live question says who it is for (me, everyone or someone else) and who asked, by role or first name as heard. A question for someone else never takes the focus card.
+- While listening, the model also reads a short briefing from the folder when it exists: the start of `memory/MEMORY.md`, the two newest files in `memory/daily-logs/` and the last 15 commit subjects, at most 16,000 characters, re-read at most once a minute.
+
+### Changed
+
+- Listening reacts faster. The transcript is checked every 3 seconds instead of every 20. A question mark, your name, a question word at the start or a tag such as "oder?" or "right?" starts a step at once; other lines wait at most 12 seconds. An unchanged transcript is not read again.
+- A step now has two parts. A quick one finds which questions were asked, which one is on the table, who it is for and what comes next, and shows them at once, the new rows marked "answering …". A second one then writes 2–3 answers per question, safest first, from the repository lines found, the prepared questions, your recent work and the briefing. The next question can already be detected meanwhile. A failed call waits 6 seconds before the same lines are tried again.
+- Relevance now reads: 5 = addressed to you by name or about your ticket or work, 4 = your topic, 3 = asked of everyone, 2 = someone else's topic you could add to, 1 = clearly someone else's.
+- The pane has a two-line header: title, number of prepared questions, language and version; then the buttons, with the listening status on the **Listening** button (for example "◉ Listening · 212 utterances · 12 s ago"). The legend moved under **More**.
+- **UP NEXT · FOR YOU** shows at most 3 predicted questions: yours first (marked "· you"), then by likelihood, then newest, each with its best answer in one line. "↻ take N new" sits in its title row.
+- Below it, **SAFE TO SAY · MY RECENT WORK**, **ASKED EARLIER** (questions from the call that were not prepared, newest first), **PREPARED** and **SOURCES** are folded to one line each while listening; a press on a section title unfolds it. Paused, **PREPARED** and **SAFE TO SAY** stand open.
+- In the desktop app the focus card uses larger text sizes; the terminal keeps one size.
+- Stored state from earlier versions loads as before, prepared questions keep working, and the export format is unchanged.
+
 ## 0.12.1 — 2026-10-15
 
 **Update the mod and run `/reload-plugins`; nothing else to do.**

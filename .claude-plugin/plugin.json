@@ -1,6 +1,6 @@
 {
   "name": "great-question",
-  "version": "0.12.1",
+  "version": "0.13.0",
   "description": "Side panel with the questions most likely to come up before a pitch, meeting or daily stand-up, with answers ranked by risk; listens along via Wispr Flow",
   "author": { "name": "Jan Schultheiss" },
   "homepage": "https://github.com/jsc2304/great-question",
