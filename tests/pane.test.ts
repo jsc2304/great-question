@@ -572,7 +572,7 @@ test('a reply cut short or not JSON leaves the lines unread: the status says so 
   await clock.advance(6_000)
   expect(await ui.find({ text: 'Which payment methods at launch?' })).toBeDefined()
   // Finding questions is short; their answers get room for three options each.
-  expect(limits).toEqual([700, 700, 1800])
+  expect(limits).toEqual([1200, 1200, 3000])
   expect(await ui.find({ key: 'ear', text: /· 0 s ago/ })).toBeDefined()
   await ui.unmount()
 })

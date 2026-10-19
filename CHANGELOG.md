@@ -21,6 +21,7 @@ Versions follow semantic versioning. Newest release first.
 - **UP NEXT · FOR YOU** shows at most 3 predicted questions: yours first (marked "· you"), then by likelihood, then newest, each with its best answer in one line. "↻ take N new" sits in its title row.
 - Below it, **SAFE TO SAY · MY RECENT WORK**, **ASKED EARLIER** (questions from the call that were not prepared, newest first), **PREPARED** and **SOURCES** are folded to one line each while listening; a press on a section title unfolds it. Paused, **PREPARED** and **SAFE TO SAY** stand open.
 - In the desktop app the focus card uses larger text sizes; the terminal keeps one size.
+- *Fast (Haiku)* now asks for low thinking effort: the current Haiku thinks at medium effort by default and would otherwise answer several seconds later, with its thinking counted against the reply's token cap.
 - Stored state from earlier versions loads as before, prepared questions keep working, and the export format is unchanged.
 
 ## 0.12.1 — 2026-10-15

@@ -69,7 +69,7 @@ const quality = atom({ plugin: 'great-question', key: 'quality' } as const, 'fas
 // Who answers live and how hard it thinks. A slower level answers later: a step still running when the next is due skips it.
 // A completion has no time limit of its own: one that never answered held the listening step, and every later one, for good.
 const QUALITY: Record<Quality, { label: string; model: string; effort?: 'low' | 'high'; timeoutMs: number }> = {
-  fast: { label: 'Fast (Haiku)', model: 'haiku', timeoutMs: 30_000 },
+  fast: { label: 'Fast (Haiku)', model: 'haiku', effort: 'low', timeoutMs: 30_000 },
   balanced: { label: 'Balanced (Sonnet, low)', model: 'sonnet', effort: 'low', timeoutMs: 45_000 },
   thorough: { label: 'Thorough (Sonnet, high)', model: 'sonnet', effort: 'high', timeoutMs: 90_000 },
 }
@@ -541,7 +541,8 @@ const listen = async ($: EngineInterface) => {
     effort: 'low',
     system: SYSTEM,
     prompt: [{ text: known, cache: true }, { text: detectTask(tail, language, me.name) }],
-    maxTokens: 700,
+    // Thinking counts against the cap on the current Haiku: room for a short think and the JSON.
+    maxTokens: 1200,
     timeoutMs: 15_000,
   })
   const text = reply.isAnswered ? reply.text : ''
@@ -583,7 +584,7 @@ const listen = async ($: EngineInterface) => {
           effort,
           system: GROUND_SYSTEM,
           prompt: [{ text: known, cache: true }, { text: ground(items, language) }],
-          maxTokens: 1800,
+          maxTokens: 3000,
           timeoutMs,
         })
         if (answers.isAnswered) await update($, live, l => applyAnswers({ ...IDLE, ...l }, questions, answers.text))
