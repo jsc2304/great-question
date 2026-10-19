@@ -6,12 +6,14 @@ import {
   GROUND_SYSTEM,
   IDLE,
   SYSTEM,
-  applyGrounding,
+  applyAnswers,
   applyReply,
   asText,
+  detectTask,
   githubBase,
   grepArgs,
   ground,
+  isTrigger,
   knowledge,
   languageRule,
   logArgs,
@@ -23,7 +25,6 @@ import {
   rowKey,
   parseSource,
   settleLookup,
-  task,
   toAnswers,
   topHits,
   withRisks,
@@ -54,7 +55,14 @@ const version = atom({ plugin: 'great-question', key: 'version' } as const, '')
 // Sections folded the other way round from their default; see `isUnfolded` in the pane.
 const toggled = atom({ plugin: 'great-question', key: 'toggled' } as const, [])
 
-const LISTEN_MS = 20_000
+// How often listening looks at the transcript; Wispr writes a line about a second after it was said.
+const TICK_MS = 3_000
+// New lines without a question mark, my name or a question's opening wait this long for a model step.
+const STEP_MS = 12_000
+const LINK_MS = 20_000
+const BRIEF_MS = 60_000
+// A step whose model call failed waits this long before the same lines try again.
+const RETRY_MS = 6_000
 // A recording counts as running while Wispr wrote its live transcript this recently.
 const FRESH_MS = 3 * 60_000
 const quality = atom({ plugin: 'great-question', key: 'quality' } as const, 'fast')
@@ -396,7 +404,7 @@ const setOpen = async ($: EngineInterface, change: (list: string[]) => string[])
 
 const age = (ms: number) => (ms < 90_000 ? `${Math.round(ms / 1000)} s` : `${Math.round(ms / 60_000)} min`)
 
-/** The Wispr recording whose live transcript changed last, if it changed within FRESH_MS. */
+/** The Wispr recording whose live transcript changed last, with when it changed, if that was within FRESH_MS. */
 const runningRecording = async ($: EngineInterface, now: number) => {
   const root = `${await $.env.get('HOME')}/Library/Application Support/Wispr Flow/meetings`
   let best: { path: string; mtimeMs: number } | null = null
@@ -408,7 +416,39 @@ const runningRecording = async ($: EngineInterface, now: number) => {
     if (!best || mtimeMs > best.mtimeMs) best = { path, mtimeMs }
   }
 
-  return best && now - best.mtimeMs < FRESH_MS ? best.path : null
+  return best && now - best.mtimeMs < FRESH_MS ? best : null
+}
+
+// The transcript as last read: read again only when its file changed.
+let heard: { path: string; mtimeMs: number; text: string } | null = null
+
+/** The running recording's transcript; an unchanged file is not read again. */
+const transcript = async ($: EngineInterface, path: string, mtimeMs: number) => {
+  if (heard?.path !== path || heard.mtimeMs !== mtimeMs) heard = { path, mtimeMs, text: (await $.fs.read(path)) as string }
+  return heard.text
+}
+
+// What the repository says is current, by folder, read at most once a minute.
+let briefed: { folder: string; at: number; text: string } | null = null
+
+/** The folder's memory file, its two newest daily logs and its last commits, newest first; nothing where they are missing. */
+const readBriefing = async ($: EngineInterface, folder: string, now: number) => {
+  if (briefed?.folder === folder && now - briefed.at < BRIEF_MS) return briefed.text
+  const head = async (path: string, max: number) =>
+    (await $.fs.exists(path).catch(() => false)) ? String((await $.fs.read(path).catch(() => '')) ?? '').slice(0, max) : ''
+  const logs = `${folder}/memory/daily-logs`
+  // Dated names sort by day; a README beside them is no log.
+  const days = (await $.fs.exists(logs).catch(() => false))
+    ? (await $.fs.list(logs).catch(() => [])).filter(e => e.kind === 'file' && /^\d/.test(e.name)).map(e => e.name).sort().reverse().slice(0, 2)
+    : []
+  const parts: [string, string][] = [
+    ['memory/MEMORY.md', await head(`${folder}/memory/MEMORY.md`, 6_000)],
+    ...(await Promise.all(days.map(async d => [`memory/daily-logs/${d}`, await head(`${logs}/${d}`, 3_000)] as [string, string]))),
+    ['git log --oneline -15', (await git($, ['log', '--oneline', '-15'], folder).catch(() => null)) ?? ''],
+  ]
+  const text = parts.filter(([, t]) => t.trim()).map(([label, t]) => `${label}:\n${t.trim()}`).join('\n\n').slice(0, 16_000)
+  briefed = { folder, at: now, text }
+  return text
 }
 
 /** Lines in the session's repository that carry a question's words; none outside a git repository. */
@@ -426,6 +466,19 @@ const myWork = async ($: EngineInterface, cwd: string) => {
     return { name: '', recent: [] }
   }
 }
+
+// My work by folder, asked of git at most once a minute: ticks with waiting lines need my name every 3 s.
+let worked: { folder: string; at: number; me: Awaited<ReturnType<typeof myWork>> } | null = null
+
+const myWorkNow = async ($: EngineInterface, folder: string, now: number) => {
+  if (worked?.folder !== folder || now - worked.at >= BRIEF_MS) worked = { folder, at: now, me: await myWork($, folder) }
+  return worked.me
+}
+
+// Questions whose answers are being written now: a later step leaves them to the call already under way.
+const answering = new Set<string>()
+// A failed model step holds the next one off until then, so a trigger in the unread lines cannot fire every tick.
+let retryAt = 0
 
 // Repository lookups by subagent: agent id to the question it looks up. A notification of one of them is dropped.
 const lookups = new Map<string, string>()
@@ -447,60 +500,103 @@ const lookUp = async ($: EngineInterface, question: string, set: QuestionSet | n
   await update($, live, l => ({ ...l, looking: [...l.looking, question] }))
 }
 
-/** One listening step: read the transcript's tail, let a small model match it against the prepared questions. */
+/**
+ * One listening tick: read the transcript when it changed and, when the new lines may hold a question (or have waited
+ * STEP_MS), run a step. A step first lets a small model find who asks what (DETECT) and paints that, then writes the
+ * answers for every question still waiting (ANSWER) while a subagent looks up the question asked now.
+ */
 const listen = async ($: EngineInterface) => {
   const state = { ...IDLE, ...(await read($, live)) }
   const set = await read($, current)
   if (!state.isOn) return
   const now = await $.clock.now()
-  const path = await runningRecording($, now)
-  if (!path) {
+  const recording = await runningRecording($, now)
+  if (!recording) {
     await update($, live, l => ({ ...l, status: 'no running Wispr recording found' }))
     return
   }
-  const { lines, tail } = parseTranscript((await $.fs.read(path)) as string)
+  const { path, mtimeMs } = recording
   const base = state.meeting === path ? state : { ...IDLE, isOn: true, meeting: path }
-  // Written every step, so the age in the status line stays true while nobody speaks.
-  const reading = (l: Live) => `listening · ${lines} utterances · last utterance ${age(now - (l.changedAt || now))} ago`
-  if (lines === base.lines) {
-    await update($, live, l => (l.isOn ? { ...l, status: reading(l) } : l))
+  const { lines: total, tail, fresh } = parseTranscript(await transcript($, path, mtimeMs), base.lines)
+  // The file's time is when the last line was written; written every tick, so the age stays true while nobody speaks.
+  const reading = (l: Live) => {
+    const left = l.pending.filter(q => !answering.has(q)).length
+    return `listening · ${total} utterances · last utterance ${age(now - mtimeMs)} ago${left ? ` · ${left} without answers, the next step tries again` : ''}`
+  }
+  const folder = set?.folder ?? (await $.session.cwd())
+  const me = fresh.length ? await myWorkNow($, folder, now) : { name: '', recent: [] }
+  const names = me.name.split(/\s+/).filter(n => n.length >= 3)
+  if (!fresh.length || now < retryAt || !(isTrigger(fresh, names) || now - base.steppedAt >= STEP_MS)) {
+    await update($, live, l => (l.isOn ? { ...l, changedAt: mtimeMs, status: reading(l), phase: l.phase === 'idle' ? 'listening' : l.phase } : l))
     return
   }
-  const me = await myWork($, set?.folder ?? (await $.session.cwd()))
-  const { model, effort, timeoutMs } = await levelOf($)
-  // ponytail: whole tail every 20 s while lines grow; a cheaper diff-only prompt if cost matters
+
+  await update($, live, l => (l.isOn ? { ...l, phase: 'detecting' } : l))
+  const language = await read($, lang)
+  // The same opening for both calls, so the second reads it from the cache.
+  // ponytail: the whole two-minute tail every step; only the marked lines plus a summary if the cost shows
+  const known = knowledge(set, { ...base, recent: me.recent }, await readBriefing($, folder, now))
   const reply = await $.model.complete({
-    model,
-    effort,
+    model: 'haiku',
+    effort: 'low',
     system: SYSTEM,
-    prompt: [{ text: knowledge(set, { ...base, recent: me.recent }), cache: true }, { text: task(tail, await read($, lang), me.name) }],
-    // Up to six questions with three answers each: 2000 tokens cut the JSON short, and a cut reply changes nothing.
-    maxTokens: 4000,
-    timeoutMs,
+    prompt: [{ text: known, cache: true }, { text: detectTask(tail, language, me.name) }],
+    maxTokens: 700,
+    timeoutMs: 15_000,
   })
-  if (!reply.isAnswered) {
-    await update($, live, l => ({ ...l, status: `model gave no answer (${reply.reason})` }))
-    return
-  }
-  const applied = applyReply(base, set, reply.text)
-  // Not the asked-for JSON: the lines stay unread, so the next step tries them again.
+  const text = reply.isAnswered ? reply.text : ''
+  const applied = reply.isAnswered ? applyReply(base, set, text, now) : base
+  // No answer, or not the asked-for JSON: the lines stay unread, so a step after RETRY_MS tries them again.
   if (applied === base) {
-    await update($, live, l => ({ ...l, status: 'model reply was no JSON; trying again' }))
+    retryAt = now + RETRY_MS
+    const why = reply.isAnswered ? 'model reply was no JSON; trying again' : `model gave no answer (${reply.reason})`
+    await update($, live, l => (l.isOn ? { ...l, status: why, phase: l.pending.length ? 'answering' : 'listening' } : l))
     return
   }
-  let step = { ...applied, lines, changedAt: now, recent: me.recent }
-  // New questions from this step: look their words up in the repository and let the model answer from the lines found.
-  const isNew = (q: Question, before: Question[]) => !before.some(b => b.question === q.question)
-  const fresh = [...step.added.filter(q => isNew(q, base.added)), ...step.next.filter(q => isNew(q, base.next))].filter(q => q.search?.length)
-  const items = (await Promise.all(fresh.map(async q => ({ question: q.question, hits: await repoHits($, q.search!) })))).filter(it => it.hits.length)
-  if (items.length) {
-    const grounded = await $.model.complete({ model, effort, system: GROUND_SYSTEM, prompt: [{ text: ground(items, await read($, lang)) }], maxTokens: 2000, timeoutMs })
-    if (grounded.isAnswered) step = applyGrounding(step, items.map(it => it.question), grounded.text)
+  const heardNow = { lines: total, changedAt: mtimeMs, recent: me.recent }
+  // Folded into the state as it stands now: answers, lookups and rows an earlier step's answer call wrote meanwhile stay.
+  const step = await update($, live, l => {
+    if (!l.isOn) return l
+    const folded = l.meeting === path ? applyReply({ ...IDLE, ...l }, set, text, now) : applied
+    return { ...folded, ...heardNow, status: reading({ ...folded, pending: [] }) }
+  })
+  if (!step.isOn) return
+  const isNewCurrent = !!step.current && step.current !== base.current
+  if (isNewCurrent && !(await read($, opened)).length) await $.ui.scroll({ in: PANE, to: 'start', block: 'start' }).catch(() => {})
+
+  // Detached: the next tick may detect while answers are being written. It writes rows, pending and phase only; the
+  // status line belongs to the ticks.
+  const answer = async () => {
+    const rows = [...step.added, ...step.next]
+    const waiting = step.pending
+      .filter(q => !answering.has(q))
+      .map(q => rows.find(r => r.question === q))
+      .filter((q): q is Question => !!q)
+    const questions = waiting.map(q => q.question)
+    if (questions.length) {
+      questions.forEach(q => answering.add(q))
+      try {
+        const items = await Promise.all(waiting.map(async q => ({ question: q.question, hits: q.search?.length ? await repoHits($, q.search) : [] })))
+        const { model, effort, timeoutMs } = await levelOf($)
+        const answers = await $.model.complete({
+          model,
+          effort,
+          system: GROUND_SYSTEM,
+          prompt: [{ text: known, cache: true }, { text: ground(items, language) }],
+          maxTokens: 1800,
+          timeoutMs,
+        })
+        if (answers.isAnswered) await update($, live, l => applyAnswers({ ...IDLE, ...l }, questions, answers.text))
+      } finally {
+        // ponytail: a call that never settles keeps its questions here until the session restarts; timeoutMs bounds it
+        questions.forEach(q => answering.delete(q))
+      }
+    }
+    const after = { ...IDLE, ...(await read($, live)) }
+    void linkAll($, answerSources([...after.added, ...after.next]))
   }
-  // Keep what a lookup finished or started meanwhile; this step does not know about it.
-  await update($, live, l => (l.isOn ? { ...step, deep: l.deep, looking: l.looking, status: reading(step) } : l))
-  void linkAll($, answerSources([...step.added, ...step.next]))
-  if (step.current && step.current !== base.current) await lookUp($, step.current, set, { ...IDLE, ...(await read($, live)) })
+  void answer().catch(() => {})
+  if (isNewCurrent) await lookUp($, step.current!, set, { ...IDLE, ...(await read($, live)) })
 }
 
 const slug = (text: string) =>
@@ -598,9 +694,15 @@ export const register: Register = on => {
         'Shows a question set (the most likely questions for a pitch, meeting or daily stand-up, with answer options by risk) in the Great Question pane and stores it for this repository.',
       inputSchema: SCHEMA,
     })
-    $.clock.every(LISTEN_MS, () => {
-      // Links a first try missed (git not ready, a source new since) come with the next tick.
-      void linkPending($)
+    // What the last module read is gone with it: a new one reads the transcript and the briefing anew.
+    heard = null
+    briefed = null
+    worked = null
+    answering.clear()
+    retryAt = 0
+    // Links a first try missed (git not ready, a source new since) come with the next round.
+    $.clock.every(LINK_MS, () => void linkPending($))
+    $.clock.every(TICK_MS, () => {
       if (isListening) return
       isListening = true
       void listen($).finally(() => (isListening = false))

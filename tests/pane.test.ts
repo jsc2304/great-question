@@ -187,21 +187,33 @@ test('an empty set is refused', async ($, on) => {
 
 const guess = (question: string) => ({ question, relevance: 4, confidence: 2, answers: [{ text: 'It depends', risk: 'vague', note: 'promise nothing' }] })
 
-/** A running Wispr recording that grows by one utterance per step, and a model that answers from a queue. */
+type Row = { question: string; answers?: unknown[] }
+
+/** A step's two replies: the questions without answers, then their answers by number, as the model gives them. */
+const detectThenAnswer = (reply: { new?: Row[]; next?: Row[] }) => {
+  const rows = [...(reply.new ?? []), ...(reply.next ?? [])]
+  const bare = (list?: Row[]) => list?.map(({ answers, ...q }) => q)
+  const answered = rows.some(q => q.answers?.length)
+  return [JSON.stringify({ ...reply, new: bare(reply.new), next: bare(reply.next) }), ...(answered ? [JSON.stringify({ answers: { ...rows.map(q => q.answers ?? []) } })] : [])]
+}
+
+/** A running Wispr recording that grows by one question per step, and a model that answers from a queue. */
 const meeting = (on: On, clock: { now: () => number }) => {
   const replies: string[] = []
   let lines = 0
+  // The file's time moves only when a line is written.
+  let wrote = { lines: 0, at: clock.now() }
   mock.env(on, { HOME: '/h' })
   on('fs.list', () => ({ value: [{ kind: 'dir', name: 'm1' }] }) as never)
   on('fs.exists', () => ({ value: true }) as never)
-  on('fs.stat', () => ({ value: { mtimeMs: clock.now() } }) as never)
+  on('fs.stat', () => ((wrote = wrote.lines === lines ? wrote : { lines, at: clock.now() }), { value: { mtimeMs: wrote.at } }) as never)
   on('fs.read', ($, e) =>
-    ({ value: e.path.endsWith('live.ndjson') ? Array.from({ length: lines }, (_, i) => JSON.stringify({ text: `Sentence ${i}`, endRecordingMs: i })).join('\n') : '' }) as never)
+    ({ value: e.path.endsWith('live.ndjson') ? Array.from({ length: lines }, (_, i) => JSON.stringify({ text: `Sentence ${i}?`, endRecordingMs: i })).join('\n') : '' }) as never)
   on('model.complete', () => ({ value: { isAnswered: true, text: replies.shift() ?? '{}', usage: {} } }) as never)
-  return (reply?: object) => {
+  return (reply?: { new?: Row[]; next?: Row[] }) => {
     if (reply) {
       lines++
-      replies.push(JSON.stringify(reply))
+      replies.push(...detectThenAnswer(reply))
     }
   }
 }
@@ -209,7 +221,7 @@ const meeting = (on: On, clock: { now: () => number }) => {
 test('while a row is open the live rows stand still; new ones wait behind take new and arrive closed', async ($, on) => {
   const clock = bottoms(on)
   const say = meeting(on, clock)
-  const step = async (reply?: object) => (say(reply), clock.advance(20_000))
+  const step = async (reply?: object) => (say(reply), clock.advance(3_000))
   await $.session.start({ cwd: '/repo' } as never)
   await $.tool.call({ tool: 'mcp__great-question__show_questions', ...SET })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
@@ -234,16 +246,16 @@ test('while a row is open the live rows stand still; new ones wait behind take n
   expect(await ui.find({ text: 'Source: Offer p. 4' })).toBeDefined()
   expect(await ui.find({ key: 'sync' })).toBeUndefined()
 
-  // All closed: news flows straight in, after what was there.
+  // All closed: news flows straight in; among equally likely predictions the newest leads.
   await ui.press({ key: COST })
   await step({ next: [guess('What about Italy?')] })
   const live = (await ui.findAll({ type: 'Button', text: /Google|Italy/ })).map(b => b.text)
-  expect(live).toEqual([expect.stringContaining('Why Google?'), expect.stringContaining('What about Italy?')])
+  expect(live).toEqual([expect.stringContaining('What about Italy?'), expect.stringContaining('Why Google?')])
   expect(await ui.find({ key: 'sync' })).toBeUndefined()
 
-  // Nobody speaks: the status says how long ago the transcript last grew.
-  await step()
-  expect(await ui.find({ key: 'ear', text: /· 20 s ago/ })).toBeDefined()
+  // Nobody speaks: the ear button says how long ago the transcript last grew (as of the last 3 s tick).
+  await clock.advance(21_000)
+  expect(await ui.find({ key: 'ear', text: /· 21 s ago/ })).toBeDefined()
 
   // An asked question keeps its place while listening, marked ✓; paused, it moves to the end.
   await step({ asked: [1], current: { set: 1 } })
@@ -270,7 +282,7 @@ test('a question from the call is answered from the repository; a lookup starts 
   on('fs.exists', () => ({ value: true }) as never)
   on('fs.stat', () => ({ value: { mtimeMs: clock.now() } }) as never)
   on('fs.read', ($, e) =>
-    ({ value: e.path.endsWith('live.ndjson') ? Array.from({ length: lines }, (_, i) => JSON.stringify({ text: `Sentence ${i}`, endRecordingMs: i })).join('\n') : '' }) as never)
+    ({ value: e.path.endsWith('live.ndjson') ? Array.from({ length: lines }, (_, i) => JSON.stringify({ text: `Sentence ${i}?`, endRecordingMs: i })).join('\n') : '' }) as never)
   on('model.complete', () => ({ value: { isAnswered: true, text: replies.shift() ?? '{}', usage: {} } }) as never)
   on('process.run', () => ({ value: { exitCode: 0, stdout: 'docs/ops.md:12:We deploy with OpenTofu', stderr: '' } }) as never)
   on('agent.spawn', ($, e) => (spawned.push(e.prompt), { agentId: 'ag1', model: 'haiku' }) as never)
@@ -284,10 +296,10 @@ test('a question from the call is answered from the repository; a lookup starts 
   // The step finds a new question with words to look up; the second call answers it from the lines found.
   lines = 1
   replies.push(
-    JSON.stringify({ new: [{ question: 'How do we deploy?', search: ['deploy'], answers: [{ text: 'Somehow', risk: 'vague' }] }], current: { new: 0 } }),
+    JSON.stringify({ new: [{ question: 'How do we deploy?', search: ['deploy'] }], current: { new: 0 } }),
     JSON.stringify({ answers: [[{ text: 'With OpenTofu', risk: 'sourced', source: 'docs/ops.md:12' }]] }),
   )
-  await clock.advance(20_000)
+  await clock.advance(3_000)
   expect(await ui.find({ text: 'With OpenTofu' })).toBeDefined()
   expect(await ui.find({ text: 'Source: docs/ops.md:12' })).toBeDefined()
   expect(await ui.find({ text: 'Somehow' })).toBeUndefined()
@@ -389,10 +401,10 @@ test('listening with nothing prepared: questions from the transcript, answers fr
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'ear' })
   replies.push(
-    JSON.stringify({ new: [{ question: 'How do we deploy?', search: ['deploy'], answers: [{ text: 'Somehow', risk: 'vague' }] }], current: { new: 0 } }),
+    JSON.stringify({ new: [{ question: 'How do we deploy?', search: ['deploy'] }], current: { new: 0 } }),
     JSON.stringify({ answers: [[{ text: 'With OpenTofu', risk: 'sourced', source: 'docs/ops.md:12' }]] }),
   )
-  await clock.advance(20_000)
+  await clock.advance(3_000)
   expect(prompts[0]).toContain('No prepared question set.')
   expect(await ui.find({ text: 'With OpenTofu' })).toBeDefined()
   await ui.unmount()
@@ -406,8 +418,8 @@ test('a reply whose note or source is not text cannot blank the pane', async ($,
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   await ui.press({ key: 'ear' })
   // Asked now, so ASKED NOW draws its answers at once; before 0.10.3 the engine refused every redraw from here on.
-  say({ new: [{ question: 'How do we deploy?', answers: [{ text: 'Somehow', risk: 'vague', note: { why: 'x' }, source: { path: 'docs/ops.md' } }] }], current: { new: 0 } })
-  await clock.advance(20_000)
+  say({ new: [{ question: 'How do we deploy?', answers: [{ text: 'Somehow', risk: 'vague', note: { why: 'x' }, source: { path: 'docs/ops.md' } }] }], current: { new: 0 } } as never)
+  await clock.advance(3_000)
   expect(await ui.find({ text: 'Somehow' })).toBeDefined()
   await ui.press({ key: 'ear' })
   expect(await ui.find({ key: 'ear', text: 'Listen live' })).toBeDefined()
@@ -508,14 +520,14 @@ test('listening: my last commits stay on show as safe to say; a closed row offer
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'ear' })
   replies.push(
-    JSON.stringify({
+    ...detectThenAnswer({
       next: [{ question: 'When is the fix on PRE?', answers: [
         { text: 'Tomorrow at nine', risk: 'commitment', note: 'nobody agreed a date' },
         { text: 'It is fixed on Q; PRE is still open', risk: 'vague', note: 'thin' },
       ] }],
     }),
   )
-  await clock.advance(20_000)
+  await clock.advance(3_000)
   expect(prompts[0]).toContain('Alex Example')
   expect(prompts[0]).toContain('Fix the publish rule (source: commit abc1234, 2026-10-14)')
   // Listening folds my recent work; one press opens it.
@@ -542,7 +554,7 @@ test('prepared questions carry what I worked on last; the pane shows it without 
 
 test('a reply cut short or not JSON leaves the lines unread: the status says so and the next step tries them again', async ($, on) => {
   const clock = bottoms(on)
-  const replies = ['{"new": [{"question": "Which payment methods at launch?", "answers": [{"text": "Card', JSON.stringify({ new: [guess('Which payment methods at launch?')], current: { new: 0 } })]
+  const replies = ['{"new": [{"question": "Which payment methods at launch?", "to": "a', ...detectThenAnswer({ new: [guess('Which payment methods at launch?')], current: { new: 0 } } as never)]
   const limits: number[] = []
   mock.env(on, { HOME: '/h' })
   on('fs.list', () => ({ value: [{ kind: 'dir', name: 'm1' }] }) as never)
@@ -554,12 +566,13 @@ test('a reply cut short or not JSON leaves the lines unread: the status says so 
   await $.session.start({ cwd: '/repo' } as never)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'ear' })
-  await clock.advance(20_000)
+  await clock.advance(3_000)
   expect(await ui.find({ text: 'model reply was no JSON; trying again' })).toBeDefined()
-  expect(limits[0]).toBeGreaterThan(2000)
-  // The transcript has not grown, yet the step runs again and the question arrives.
-  await clock.advance(20_000)
+  // The transcript has not grown, yet the step runs again after a short wait and the question arrives.
+  await clock.advance(6_000)
   expect(await ui.find({ text: 'Which payment methods at launch?' })).toBeDefined()
+  // Finding questions is short; their answers get room for three options each.
+  expect(limits).toEqual([700, 700, 1800])
   expect(await ui.find({ key: 'ear', text: /· 0 s ago/ })).toBeDefined()
   await ui.unmount()
 })
@@ -586,8 +599,10 @@ test('the Model button sets who answers live and how hard it thinks', async ($, 
   expect(await ui.find({ key: 'quality', text: /Model: Thorough \(Sonnet, high\)/ })).toBeDefined()
   await ui.press({ key: 'ear' })
   lines = 1
-  await clock.advance(20_000)
-  expect(asked[0]).toEqual({ model: 'sonnet', effort: 'high', timeoutMs: 90_000 })
+  await clock.advance(3_000)
+  // Finding the questions is always quick; the level decides who answers them.
+  expect(asked[0]).toEqual({ model: 'haiku', effort: 'low', timeoutMs: 15_000 })
+  expect(asked[1]).toEqual({ model: 'sonnet', effort: 'high', timeoutMs: 90_000 })
   expect(spawned[0]?.model).toBe('sonnet')
   await ui.press({ key: 'quality' })
   expect(await ui.find({ key: 'quality', text: /Model: Fast/ })).toBeDefined()
