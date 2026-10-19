@@ -45,13 +45,15 @@ Where the documents give no firm answer, the panel offers, safest first, what is
 
 ![An unsure question with three kinds of answer: weak, only if covered, don't say](docs/answer-risks.png)
 
-Listening along: the question just asked moves to **ASKED NOW** with answers by risk, your recent work stays on show as safe to say, and the next likely questions appear below, each with its safest answer in one line:
+Listening along: the question just asked appears with answers by risk, your recent work stays on show as safe to say, and the next likely questions appear below, each with its safest answer in one line:
 
 ![Listening: the question asked now with its answers, my recent work, two likely next questions and two questions asked but not prepared](docs/live.png)
 
 While a question is open, new ones wait behind a button instead of moving the list:
 
 ![A held live list: the question asked now, my recent work, a button to take three new questions and the open question that holds the list](docs/live-hold.png)
+
+The pictures show the 0.12 layout. Since 0.13 the question asked now is drawn as a large card at the top, and the sections below it are folded while listening.
 
 *Screenshots show a fictional pitch for a fictional company; no real meeting was recorded.*
 
@@ -107,7 +109,7 @@ Sources and the sources of answers are links where they point somewhere: a URL, 
 
 Buttons in the panel:
 
-- **Listen live**: reads the running Wispr Flow recording every 20 seconds and shows **ASKED NOW**, **SAFE TO SAY · MY RECENT WORK**, **LIKELY NEXT** and **ASKED IN THE MEETING, NOT PREPARED**. Switching it off only pauses.
+- **Listen live**: checks the running Wispr Flow recording every 3 seconds and shows the question asked now as a card, **UP NEXT · FOR YOU**, **SAFE TO SAY · MY RECENT WORK** and **ASKED EARLIER**. While listening, the button carries the status, for example "◉ Listening · 212 utterances · 12 s ago". Switching it off only pauses.
 - **Find likely questions**: like `/great-question-prep` without an occasion. A background agent reads the repository and connected sources while your session stays free; the panel shows a turning ◐ with the time taken, and the questions appear when it is done.
 - **Open all** and **Close all**: open or close every visible question. **Close all** shows as soon as one question is open and closes them all at once.
 - **More**: shows the less frequent settings and actions:
@@ -115,26 +117,32 @@ Buttons in the panel:
   - **Model**: who answers while listening and how hard it thinks: *Fast (Haiku)*, *Balanced (Sonnet, low effort)* or *Thorough (Sonnet, high effort)*. Applies to the live step, the answers from the repository and the model of the ASKED NOW lookup; the background preparation keeps the session's model. Slower levels answer later: a step still running when the next is due is skipped.
   - **Sort**: by answer confidence (*safest to answer*) or by likelihood (*most likely asked*).
   - **Meeting / Practice**: *Meeting* shows the strongest first, *Practice* turns the order round and puts the weakest questions on top.
+  - **Legend**: what the risk marks mean.
   - **Export**: writes the panel as Markdown to `question-sets/YYYY-MM-DD-HHMM-<title>.md` in the project folder.
   - **Clear** (only while paused): deletes the live results.
 
 While listening, the panel follows the questions you have to answer:
 
-- **ASKED NOW**, **LIKELY NEXT** and **ASKED IN THE MEETING, NOT PREPARED** hold questions asked of you or of everyone, or about something you work on. Questions to someone else about their own work stay out. In a video call your voice is the microphone; your git user name helps the model spot questions addressed to you by name.
+- New lines are checked every 3 seconds. A question mark, your name, a question word at the start or a tag such as "oder?" or "right?" starts a step at once; other lines wait at most 12 seconds.
+- A step has two parts. A quick one finds which questions were asked, which one is on the table, who it is for and what comes next, and shows them at once, the new rows marked *answering …*. A second one then writes 2–3 answers per question, safest first. Meanwhile the next question can already be detected.
+- Every question says who it is for (you, everyone or someone else) and who asked, by role or first name as heard. Questions to someone else are listed with that mark but never take the card at the top. In a video call your voice is the microphone; your git user name helps the model spot questions addressed to you by name.
+- The question asked now gets a card: **ASKED OF YOU**, **ASKED · EVERYONE** or **ASKED NOW**, who asked and how long ago, the best answer with its source, one *✖ Don't say* line, and the other answers behind *▸ N more answers*. In the desktop app the card uses larger text; the terminal keeps one size.
+- **UP NEXT · FOR YOU** shows at most 3 questions likely to come next: yours first, marked *· you*, then by likelihood, then newest, each with its best answer in one line.
 - **SAFE TO SAY · MY RECENT WORK** lists what you worked on last, true whatever is asked: from the preparation (commits, pull requests, tickets or meetings, each with its source), or, when the preparation has none, your last five commits in the folder (author = your git email, merges left out).
 - Live answers come safest first. A closed question shows the one that binds you to nothing before a promise; a commitment is offered only when the question asks for a date, an owner or a scope, and never with a date or name nobody gave.
 
 While listening, answers come from the repository too:
 
-- For every new question from the call, the mod searches the session's repository for its key words (`git grep`, exports left out) and lets the model answer from the lines found. A **SAY IT** answer then names its file and line, for example `docs/offer.md:42`.
-- For the question under **ASKED NOW**, unless the prepared answers already rest on sources, a read-only subagent looks it up in more depth. While it runs, the box says *checking the repository …*; its answers then replace the quick ones, marked *from the repository*.
+- For every new question from the call, the mod searches the session's repository for its key words (`git grep`, exports left out). The answers are written from the lines found, the prepared questions, your recent work and the briefing (see [Data and confidentiality](#data-and-confidentiality)). A **SAY IT** answer then names its file and line, for example `docs/offer.md:42`.
+- For the question asked now, unless the prepared answers already rest on sources, a read-only subagent looks it up in more depth, alongside the two parts of the step. While it runs, the card says *checking the repository …*; its answers then replace the quick ones, marked *from the repository*.
 - Only the repository is searched live. Slides in Drive, Jira and other connected sources come in through the preparation only.
 
 While listening, the list only grows, it is never rebuilt:
 
-- New questions arrive closed at the end of their section and show their best answer in one line. A question keeps its wording even when the model rephrases it slightly.
+- New questions arrive closed and show their best answer in one line. A question keeps its wording even when the model rephrases it slightly.
+- Below **UP NEXT**, four sections are folded to one line each: **SAFE TO SAY · MY RECENT WORK**, **ASKED EARLIER** (questions from the call that were not prepared, newest first), **PREPARED** (the prepared questions, grouped as before, with the sort order in its title) and **SOURCES**. A press on a section title unfolds it. Paused, **PREPARED** and **SAFE TO SAY** stand open.
 - An asked question stays in place, marked ✓. Only when paused does it move to **ALREADY ASKED**.
-- While a question is open, the live sections stand still. New ones collect behind **↻ take N new** and arrive by themselves once all questions are closed. **ASKED NOW** always stays live.
+- While a question is open, the live sections stand still. New ones collect behind **↻ take N new** in the title row of **UP NEXT** and arrive by themselves once all questions are closed. The card for the question asked now always stays live.
 
 What gets prepared depends on the project: with slides, a pitch preparation or a meeting at hand it prepares the meeting; otherwise the daily stand-up from commits, pull requests and open tickets.
 
@@ -143,7 +151,7 @@ What gets prepared depends on the project: with slides, a pitch preparation or a
 - **Record only with consent.** Wispr Flow records through this computer's microphone and system audio; no bot appears in the video call, so the others cannot see that it is being transcribed. Get the consent of everyone in the meeting before recording. In Germany, recording the privately spoken word without consent is a criminal offence (§ 201 StGB).
 - **Transcription by Wispr Flow.** Recording happens locally, transcription happens in Wispr Flow's cloud ([Wispr: on-device recording](https://wisprflow.ai/notetaker/what-is-on-device-recording), as of 14.10.2026). Great Question reads the finished transcript from the Wispr Flow app's local file.
 - **Prepared questions** are stored locally per project folder. They stay on the computer.
-- **Listening along** sends the last two minutes of the transcript, the prepared questions, the repository lines found for new questions, your git user name and your last five commit subjects to a Claude model through the same access as the session: Haiku by default, Sonnet when chosen under **More → Model**. A lookup for the question asked now runs as a read-only subagent with the same model in the session's folder. Speaker names from Wispr Flow are not sent; names mentioned in the conversation are in the text.
+- **Listening along** sends the last two minutes of the transcript, the prepared questions, the repository lines found for new questions, your git user name, your last five commit subjects and a briefing from the folder to a Claude model through the same access as the session: Haiku by default, Sonnet when chosen under **More → Model**. The briefing holds, when they exist, the first 6,000 characters of `memory/MEMORY.md`, the two newest files in `memory/daily-logs/` (3,000 characters each) and the last 15 commit subjects, at most 16,000 characters, re-read at most once a minute. A lookup for the question asked now runs as a read-only subagent with the same model in the session's folder. Speaker names from Wispr Flow are not sent; names mentioned in the conversation are in the text.
 - **Exports** with live results contain questions from the conversation, names included. In projects with confidential content, add `question-sets/` to `.gitignore` or review it before committing.
 
 ## Development
