@@ -1,5 +1,7 @@
 export type Risk = 'sourced' | 'vague' | 'commitment' | 'risky'
 export type Answer = { text: string; risk: Risk; note?: string; source?: string }
+/** Who a question heard in the meeting is for: me (by name, my ticket or my work), everyone, or someone else. */
+export type Addressee = 'me' | 'all' | 'other'
 export type Question = {
   question: string
   relevance: number
@@ -11,6 +13,12 @@ export type Question = {
   answers: Answer[]
   /** Words to look up in the repository, from a live step; not shown. */
   search?: string[]
+  /** Who the question is for, as the model read the conversation; live rows only. */
+  to?: Addressee
+  /** Who asked, as a role or the first name heard in the call; nothing when unknown. Live rows only. */
+  asker?: string
+  /** When the row was heard or predicted, in ms since the epoch; live rows only. */
+  heardAt?: number
 }
 /** Something I certainly did, said as is in any meeting. */
 export type Fact = { text: string; source?: string }
@@ -34,6 +42,9 @@ export type QuestionSet = {
   recent?: Fact[]
 }
 
+/** Where listening stands, shown on the focus card: nothing heard yet, waiting for lines, reading them, writing answers, done. */
+export type Phase = 'idle' | 'listening' | 'detecting' | 'answering' | 'ready'
+
 export type Live = {
   isOn: boolean
   status: string
@@ -52,6 +63,14 @@ export type Live = {
   looking: string[]
   /** My latest commits in the folder, read while listening. */
   recent: Fact[]
+  /** Where the last listening step stands. */
+  phase: Phase
+  /** Live questions whose answers are still being written, by question text; the pane says "answering …" for them. */
+  pending: string[]
+  /** When `current` last changed: a fresh question is marked as such and the pane scrolls to it. */
+  currentAt: number
+  /** When the last model step ran; without a question mark or my name in the new lines, the next step waits. */
+  steppedAt: number
 }
 
 declare module 'claude-code' {
@@ -77,6 +96,8 @@ declare module 'claude-code' {
       quality: Quality
       live: Live
       version: string
+      /** Sections whose fold is the opposite of their default: 'safe', 'earlier', 'prepared', 'sources'. Listening folds all four; paused, 'prepared' and 'safe' stand open. */
+      toggled: string[]
     }
   }
 }

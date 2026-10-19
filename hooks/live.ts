@@ -1,6 +1,6 @@
 import type { Answer, Fact, Lang, Live, Question, QuestionSet, Risk } from '../types'
 
-export const IDLE: Live = { isOn: false, status: '', meeting: null, lines: 0, changedAt: 0, asked: [], current: null, added: [], next: [], deep: {}, looking: [], recent: [] }
+export const IDLE: Live = { isOn: false, status: '', meeting: null, lines: 0, changedAt: 0, asked: [], current: null, added: [], next: [], deep: {}, looking: [], recent: [], phase: 'idle', pending: [], currentAt: 0, steppedAt: 0 }
 
 const RISKS: readonly Risk[] = ['sourced', 'commitment', 'vague', 'risky']
 // Risk classes as stored by 0.8 and earlier, which used German names.
