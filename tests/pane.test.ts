@@ -50,6 +50,11 @@ test('show_questions stores the set surest first, the pane draws it, practice tu
     expect(order[1]).toContain('Who is on the team?')
     expect(await ui.find({ text: 'SAFE TO ANSWER · 1' })).toBeDefined()
     expect(await ui.find({ text: /^─{8,}$/ })).toBeDefined()
+    // Paused, the prepared questions stand open and the sources are folded.
+    expect(await ui.find({ key: 'fold:prepared', text: '▾ PREPARED · 2 · surest first' })).toBeDefined()
+    expect(await ui.find({ text: 'Repository' })).toBeUndefined()
+    await ui.press({ key: 'fold:sources' })
+    expect(await ui.find({ key: 'fold:sources', text: '▾ SOURCES · 3' })).toBeDefined()
     expect(await ui.find({ text: 'Repository' })).toBeDefined()
     expect(await ui.find({ text: '• pitch/deck.html' })).toBeDefined()
     expect(await ui.find({ text: 'Meetings & transcripts' })).toBeDefined()
@@ -80,10 +85,12 @@ test('show_questions stores the set surest first, the pane draws it, practice tu
     await ui.press({ key: 'ear' })
     expect(await ui.find({ text: /paused · 0 utterances read · results stay/ })).toBeDefined()
 
-    // Language, sorting, view and export sit behind More.
+    // Language, sorting, view, export and the legend sit behind More.
     expect(await ui.find({ key: 'more', text: 'More ▸' })).toBeDefined()
     expect(await ui.find({ key: 'lang' })).toBeUndefined()
+    expect(await ui.find({ text: "✖ don't say" })).toBeUndefined()
     await ui.press({ key: 'more' })
+    expect(await ui.find({ text: "✖ don't say" })).toBeDefined()
     expect(await ui.find({ text: /^Prepared / })).toBeDefined()
     // The language button cycles Auto → DE → EN → Auto.
     expect(await ui.find({ key: 'lang', text: /Language: Auto/ })).toBeDefined()
@@ -105,6 +112,7 @@ test('show_questions stores the set surest first, the pane draws it, practice tu
     expect(practice[0]).toContain('Who is on the team?')
     await ui.press({ key: 'view' })
     await ui.press({ key: 'more' })
+    await ui.press({ key: 'fold:sources' })
     await ui.unmount()
   }
 })
@@ -206,13 +214,18 @@ test('while a row is open the live rows stand still; new ones wait behind take n
   await $.tool.call({ tool: 'mcp__great-question__show_questions', ...SET })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'ear' })
-  expect(await ui.find({ text: 'no question recognised yet' })).toBeDefined()
+  expect(await ui.find({ text: 'listening …' })).toBeDefined()
+  // Listening folds the prepared questions; the open one is looked at below.
+  await ui.press({ key: 'fold:prepared' })
 
   // The first question of a new set is open, so the live rows hold.
   await step({ next: [guess('Why Google?')] })
   expect(await ui.find({ key: T('Why Google?') })).toBeUndefined()
+  // The take-new button sits in the UP NEXT title row; the status rides on the ear button.
+  const title = (await ui.findAll({ type: 'Box', text: /UP NEXT · FOR YOU · 0/ })).filter(b => /take 1 new/.test(b.text)).pop()
+  expect(title?.props.flexDirection).toBe('row')
   expect(await ui.find({ key: 'sync', text: /take 1 new/ })).toBeDefined()
-  expect(await ui.find({ text: /listening · 1 utterances · last utterance 0 s ago/ })).toBeDefined()
+  expect(await ui.find({ key: 'ear', text: '◉ Listening · 1 utterances · 0 s ago' })).toBeDefined()
   await ui.press({ key: 'sync' })
   // In, closed, its best answer on one line; the open question stays open.
   expect(await ui.find({ key: T('Why Google?') })).toBeDefined()
@@ -230,12 +243,13 @@ test('while a row is open the live rows stand still; new ones wait behind take n
 
   // Nobody speaks: the status says how long ago the transcript last grew.
   await step()
-  expect(await ui.find({ text: /last utterance 20 s ago/ })).toBeDefined()
+  expect(await ui.find({ key: 'ear', text: /· 20 s ago/ })).toBeDefined()
 
   // An asked question keeps its place while listening, marked ✓; paused, it moves to the end.
   await step({ asked: [1], current: { set: 1 } })
   expect(await ui.find({ text: /ALREADY ASKED/ })).toBeUndefined()
   expect(await ui.find({ text: /ASKED NOW/ })).toBeDefined()
+  await ui.press({ key: 'fold:prepared' })
   await ui.press({ key: 'ear' })
   await ui.unmount()
   for (const surface of ['terminal', 'desktop'] as const) {
@@ -350,6 +364,7 @@ test('a source file links to GitHub when its repository has it on origin; only l
   await $.tool.call({ tool: 'mcp__great-question__show_questions', ...SET, sources: [...SET.sources, 'notes/local.md'] })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ text: 'Where do you want to start?' })).toBeUndefined()
+  await ui.press({ key: 'fold:sources' })
   const link = await ui.find({ type: 'Link', text: 'pitch/deck.html' })
   expect(link?.props.href).toBe('https://github.com/acme/pitch/blob/HEAD/pitch/deck.html')
   expect((await ui.find({ type: 'Link', text: 'Decision #6 (open)' }))?.props.href).toBe('https://github.com/acme/pitch/issues/6')
@@ -435,6 +450,7 @@ test('a link lookup that fails is not kept: the next tick tries again and the li
   expect(logs).toHaveLength(1)
   isDown = false
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'fold:sources' })
   expect(await ui.find({ type: 'Link', text: 'pitch/deck.html' })).toBeUndefined()
   // The next tick tries again, outside drawing.
   await clock.advance(20_000)
@@ -465,6 +481,7 @@ test('source paths count from the folder the questions were prepared in, whereve
   seen.length = 0
   await clock.advance(20_000)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'fold:sources' })
   expect((await ui.find({ type: 'Link', text: 'next-steps/README.md (0.7.0)' }))?.props.href).toBe('https://github.com/acme/next-steps/blob/HEAD/README.md')
   expect(seen.every(p => p.startsWith('/work/mods/') && !p.startsWith('/work/mods/great-question/'))).toBe(true)
   await ui.unmount()
@@ -501,7 +518,10 @@ test('listening: my last commits stay on show as safe to say; a closed row offer
   await clock.advance(20_000)
   expect(prompts[0]).toContain('Alex Example')
   expect(prompts[0]).toContain('Fix the publish rule (source: commit abc1234, 2026-10-14)')
-  expect(await ui.find({ text: 'SAFE TO SAY · MY RECENT WORK · 1' })).toBeDefined()
+  // Listening folds my recent work; one press opens it.
+  expect(await ui.find({ key: 'fold:safe', text: '▸ SAFE TO SAY · MY RECENT WORK · 1' })).toBeDefined()
+  expect(await ui.find({ text: '● Fix the publish rule' })).toBeUndefined()
+  await ui.press({ key: 'fold:safe' })
   expect(await ui.find({ text: '● Fix the publish rule' })).toBeDefined()
   expect(await ui.find({ text: 'Source: commit abc1234, 2026-10-14' })).toBeDefined()
   expect(await ui.find({ text: /○ WEAK:/ })).toBeDefined()
@@ -540,7 +560,7 @@ test('a reply cut short or not JSON leaves the lines unread: the status says so 
   // The transcript has not grown, yet the step runs again and the question arrives.
   await clock.advance(20_000)
   expect(await ui.find({ text: 'Which payment methods at launch?' })).toBeDefined()
-  expect(await ui.find({ text: /last utterance 0 s ago/ })).toBeDefined()
+  expect(await ui.find({ key: 'ear', text: /· 0 s ago/ })).toBeDefined()
   await ui.unmount()
 })
 

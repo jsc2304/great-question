@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register } from 'claude-code'
+import type { EngineInterface, Register, RenderChildren } from 'claude-code'
 
-import type { Answer, Fact, Lang, Quality, Live, Question, QuestionSet, Risk, Source, SourceKind } from '../types'
+import type { Addressee, Answer, Fact, Lang, Quality, Live, Question, QuestionSet, Risk, Source, SourceKind } from '../types'
 import {
   GROUND_SYSTEM,
   IDLE,
@@ -51,6 +51,8 @@ const sortBy = atom({ plugin: 'great-question', key: 'sortBy' } as const, 'confi
 const lang = atom({ plugin: 'great-question', key: 'lang' } as const, 'auto')
 const LANGS: Lang[] = ['auto', 'de', 'en']
 const version = atom({ plugin: 'great-question', key: 'version' } as const, '')
+// Sections folded the other way round from their default; see `isUnfolded` in the pane.
+const toggled = atom({ plugin: 'great-question', key: 'toggled' } as const, [])
 
 const LISTEN_MS = 20_000
 // A recording counts as running while Wispr wrote its live transcript this recently.
@@ -77,6 +79,10 @@ const RISKS: Record<Risk, { mark: string; label: string; action: string; color: 
   risky: { mark: '✖', label: 'risky', action: "DON'T SAY", color: 'error' },
 }
 const ORDER = Object.keys(RISKS) as Risk[]
+// The card's label by who the question is for; unknown reads ASKED NOW.
+const TO: Record<Addressee, string> = { me: 'ASKED OF YOU', all: 'ASKED · EVERYONE', other: 'ASKED · SOMEONE ELSE' }
+// UP NEXT draws this many; more would bury the next one.
+const MAX_SHOWN_NEXT = 3
 
 // Grouped by answer confidence, surest first; relevance breaks ties.
 const GROUPS = [
@@ -696,15 +702,15 @@ export const register: Register = on => {
     const stored = await read($, current)
     const hrefs = await read($, links)
     // A source as a link where it points somewhere a surface can open, plain text otherwise.
-    const sourceOf = (label: string, prefix: string, key: string) => {
+    const sourceOf = (label: string, prefix: string, key: string, size?: 'caption') => {
       const href = hrefs[label]
       return href ? (
         <Box key={key} flexDirection="row" columnGap={1}>
-          <Text dimColor>{prefix}</Text>
+          <Text dimColor size={size}>{prefix}</Text>
           <Link href={href} label={label} />
         </Box>
       ) : (
-        <Text key={key} dimColor>
+        <Text key={key} dimColor size={size}>
           {prefix} {label}
         </Text>
       )
@@ -715,7 +721,9 @@ export const register: Register = on => {
     const folder = (await $.session.cwd()).split('/').filter(Boolean).pop() ?? 'this folder'
     const prep = await read($, preparing)
     const frame = ['◐', '◓', '◑', '◒'][(await read($, tick)) % 4]
-    const took = prep ? Math.max(0, Math.round(((await $.clock.now()) - prep.since) / 1000)) : 0
+    const now = await $.clock.now()
+    const folds = await read($, toggled)
+    const took = prep ? Math.max(0, Math.round((now - prep.since) / 1000)) : 0
     const isPractice = (await read($, view)) === 'practice'
     const isByLikely = (await read($, sortBy)) === 'likelihood'
     const language = await read($, lang)
@@ -758,6 +766,7 @@ export const register: Register = on => {
     // A repository lookup's answers stand in for the question's own.
     const byRisk = (q: Question) => [...(ear.deep[q.question] ?? q.answers)].sort((a, b) => ORDER.indexOf(a.risk) - ORDER.indexOf(b.risk))
     const isAsked = (q: Question) => ear.asked.includes(q.question)
+    const isPending = (q: Question) => ear.pending.includes(q.question)
     // Live rows show their best answer when closed, so a glance is enough and nothing opens by itself.
     const questionRow = (q: Question, hasHint = false) => {
       const k = rowKey(q.question)
@@ -769,10 +778,19 @@ export const register: Register = on => {
             {isAsked(q) ? <Text dimColor>✓ </Text> : ''}
             <Text bold color={isAsked(q) ? undefined : 'text'} dimColor={isAsked(q)}>
               {q.question}
-            </Text>{' '}
-            {byRisk(q).map(a => <Text color={RISKS[a.risk].color}>{RISKS[a.risk].mark}</Text>)}
+            </Text>
+            {/* A live row says whether it is for me; a prepared one shows its answers' marks. */}
+            {hasHint ? '' : ' '}
+            {hasHint ? (q.to === 'me' ? <Text dimColor> · you</Text> : '') : byRisk(q).map(a => <Text color={RISKS[a.risk].color}>{RISKS[a.risk].mark}</Text>)}
           </Button>
-          {!isOpen(q) && hasHint && best && (
+          {!isOpen(q) && hasHint && isPending(q) && (
+            <Box paddingLeft={2}>
+              <Text dimColor color="warning">
+                answering …
+              </Text>
+            </Box>
+          )}
+          {!isOpen(q) && hasHint && !isPending(q) && best && (
             // The mark in a box of its own that never shrinks: inside one truncated line the desktop broke it apart.
             <Box paddingLeft={2} flexDirection="row" columnGap={1}>
               <Box flexShrink={0}>
@@ -825,8 +843,14 @@ export const register: Register = on => {
     const addedRows = source.added.filter(q => !inSet(q) && !nextRows.some(k => k.question === q.question))
     const drawn = new Set([...nextRows, ...addedRows].map(q => q.question))
     const waiting = frozen ? [...ear.next, ...ear.added].filter(q => !drawn.has(q.question) && !inSet(q)).length : 0
+    // Questions for me lead, then the likelier, then the newer; a few, so the next one is found at a glance.
+    const upNext = [...nextRows]
+      .sort((a, b) => Number(b.to === 'me') - Number(a.to === 'me') || b.relevance - a.relevance || (b.heardAt ?? 0) - (a.heardAt ?? 0))
+      .slice(0, MAX_SHOWN_NEXT)
     // The question on the table, always live; its row stays in its section too.
     const nowRow = ear.current ? [...set.questions, ...ear.added].find(q => q.question === ear.current) : undefined
+    // Newest first; the question asked now has the card.
+    const earlier = [...addedRows].reverse().filter(q => q.question !== ear.current).sort((a, b) => (b.heardAt ?? 0) - (a.heardAt ?? 0))
     const rows = [...nextRows, ...addedRows, ...listed.flatMap(g => g.items), ...asked]
     // Two buttons, not one toggle: closing must never mean opening every row first.
     const isAllOpen = rows.length > 0 && rows.every(isOpen)
@@ -834,44 +858,114 @@ export const register: Register = on => {
     const sorting = isPractice
       ? `Practice: ${isByLikely ? 'rarest' : 'least certain'} first`
       : isByLikely ? 'most likely first' : 'surest first'
+    // While listening the status rides on the ear button; anything else it says stays a line of its own.
+    const isHeard = ear.isOn && ear.status.startsWith('listening')
+    const earLabel = !ear.isOn ? 'Listen live' : isHeard ? `◉ L${ear.status.slice(1).replace('last utterance ', '')}` : '◉ Listening'
+    // Listening folds every section below the card; paused, the prepared questions and my recent work stand open.
+    const isUnfolded = (key: string) => (!ear.isOn && (key === 'prepared' || key === 'safe')) !== folds.includes(key)
+    const fold = (key: string, title: string, body: () => RenderChildren) => (
+      <Box key={key} flexDirection="column">
+        <Text dimColor wrap="truncate">{rule}</Text>
+        <Button key={`fold:${key}`} plain onPress={() => update($, toggled, t => (t.includes(key) ? t.filter(k => k !== key) : [...t, key]))}>
+          <Text bold dimColor>
+            {isUnfolded(key) ? '▾ ' : '▸ '}
+            {title}
+          </Text>
+        </Button>
+        {isUnfolded(key) && body()}
+      </Box>
+    )
+    // The card: who the question is for, the answer to give, the one to avoid; the rest behind a button.
+    const card = (q: Question) => {
+      const answers = byRisk(q)
+      const best = answers[0]
+      const risky = answers.find(a => a.risk === 'risky' && a !== best)
+      const rest = answers.filter(a => a !== best && a !== risky)
+      const isOther = q.to === 'other'
+      const label = [
+        (q.to && TO[q.to]) || 'ASKED NOW',
+        ...(q.asker ? [`by ${q.asker}`] : []),
+        ...(ear.currentAt > 0 ? [`${age(now - ear.currentAt)} ago`] : []),
+      ].join(' · ')
+      return (
+        <>
+          <Text size="caption" dimColor>
+            {label}
+          </Text>
+          <Text size="title" weight={isOther ? 'regular' : 'semibold'} dimColor={isOther}>
+            {q.question}
+          </Text>
+          {isPending(q) ? (
+            <Text dimColor color="warning">
+              answering …
+            </Text>
+          ) : ear.looking.includes(q.question) ? (
+            <Text dimColor>checking the repository …</Text>
+          ) : (
+            ear.deep[q.question] && <Text dimColor>from the repository</Text>
+          )}
+          {isOpen(q)
+            ? answers.map(answerRow)
+            : best && (
+                <Box flexDirection="column" marginTop={1}>
+                  <Text size="heading" weight="semibold" color={RISKS[best.risk].color}>
+                    {RISKS[best.risk].mark} {RISKS[best.risk].action}
+                  </Text>
+                  <Text size="heading" color={RISKS[best.risk].color}>
+                    {best.text}
+                  </Text>
+                  {best.source && sourceOf(best.source, 'Source:', 'now-src', 'caption')}
+                  {best.risk !== 'sourced' && best.note && (
+                    <Text size="footnote" dimColor>
+                      Note: {best.note}
+                    </Text>
+                  )}
+                </Box>
+              )}
+          {!isOpen(q) && risky && (
+            <Text size="footnote" color="error" wrap="truncate">
+              ✖ Don't say: {risky.text}
+            </Text>
+          )}
+          {rest.length > 0 && (
+            <Button key="now-more" plain onPress={() => toggle(q)}>
+              {isOpen(q) ? '▾ fewer' : `▸ ${rest.length} more answers`}
+            </Button>
+          )}
+        </>
+      )
+    }
 
     return (
       <Box flexDirection="column" gap={1}>
         <Box flexDirection="column">
           <Box flexDirection="row" justifyContent="space-between" columnGap={1}>
-            <Text bold>{set.title}</Text>
+            <Text>
+              <Text bold>{set.title}</Text>
+              {stored ? <Text dimColor> · {set.questions.length} prepared{set.language ? ` · ${set.language.toUpperCase()}` : ''}</Text> : ''}
+            </Text>
             {shown && <Text dimColor>v{shown}</Text>}
           </Box>
-          <Text dimColor>
-            {stored ? `${set.questions.length} questions${set.language ? ` · ${set.language.toUpperCase()}` : ''}` : 'Find likely questions or listen live'} · {sorting}
-          </Text>
-        </Box>
-        <Box flexDirection="row" flexWrap="wrap" columnGap={2}>
-          {ORDER.map(r => (
-            <Text key={r} color={RISKS[r].color}>
-              {RISKS[r].mark} {RISKS[r].action.toLowerCase()}
-            </Text>
-          ))}
-        </Box>
-        {/* Wraps onto further rows on a narrow pane instead of pushing buttons out of view. */}
-        <Box flexDirection="row" flexWrap="wrap" columnGap={1} rowGap={1}>
-          <Button
-            key="ear"
-            variant={ear.isOn ? 'primary' : 'secondary'}
-            label={ear.isOn ? '◉ Listening' : 'Listen live'}
-            // Stopping only pauses: what the call produced stays until Clear; a new recording starts afresh.
-            onPress={() =>
-              update($, live, l => ({
-                ...l,
-                isOn: !l.isOn,
-                status: l.isOn ? `paused · ${l.lines} utterances read · results stay` : 'starting …',
-              }))
-            }
-          />
-          <Button key="gen" label={prep ? 'Finding …' : 'Find likely questions'} onPress={() => startPrep($, '')} />
-          {rows.length > 0 && !isAllOpen && <Button key="open-all" label="Open all" onPress={() => setOpen($, () => rows.map(q => q.question))} />}
-          {isAnyOpen && <Button key="close-all" label="Close all" onPress={() => setOpen($, () => [])} />}
-          <Button key="more" dimColor label={isMore ? 'More ▾' : 'More ▸'} onPress={() => update($, more, m => !m)} />
+          {/* Wraps onto further rows on a narrow pane instead of pushing buttons out of view. */}
+          <Box flexDirection="row" flexWrap="wrap" columnGap={1} rowGap={1}>
+            <Button
+              key="ear"
+              variant={ear.isOn ? 'primary' : 'secondary'}
+              label={earLabel}
+              // Stopping only pauses: what the call produced stays until Clear; a new recording starts afresh.
+              onPress={() =>
+                update($, live, l => ({
+                  ...l,
+                  isOn: !l.isOn,
+                  status: l.isOn ? `paused · ${l.lines} utterances read · results stay` : 'starting …',
+                }))
+              }
+            />
+            <Button key="gen" label={prep ? 'Finding …' : 'Find likely questions'} onPress={() => startPrep($, '')} />
+            {rows.length > 0 && !isAllOpen && <Button key="open-all" label="Open all" onPress={() => setOpen($, () => rows.map(q => q.question))} />}
+            {isAnyOpen && <Button key="close-all" label="Close all" onPress={() => setOpen($, () => [])} />}
+            <Button key="more" dimColor label={isMore ? 'More ▾' : 'More ▸'} onPress={() => update($, more, m => !m)} />
+          </Box>
         </Box>
         {isMore && (
           <Box flexDirection="column" rowGap={1}>
@@ -909,6 +1003,13 @@ export const register: Register = on => {
                 />
               )}
             </Box>
+            <Box key="legend" flexDirection="row" flexWrap="wrap" columnGap={2}>
+              {ORDER.map(r => (
+                <Text key={r} color={RISKS[r].color}>
+                  {RISKS[r].mark} {RISKS[r].action.toLowerCase()}
+                </Text>
+              ))}
+            </Box>
             {stored && <Text dimColor>Prepared {set.generatedAt} UTC</Text>}
           </Box>
         )}
@@ -920,66 +1021,28 @@ export const register: Register = on => {
             <Text dimColor>In the background, from the repository and connected sources; the session stays free.</Text>
           </Box>
         )}
-        {ear.status && <Text dimColor>{ear.status}</Text>}
+        {ear.status && !isHeard && <Text dimColor>{ear.status}</Text>}
         {(ear.isOn || nowRow) && (
           <Box key="now" flexDirection="column" borderStyle="round" paddingX={1}>
-            <Text inverse bold> ASKED NOW </Text>
             {nowRow ? (
-              <>
-                <Box marginTop={1}>
-                  <Text bold>{nowRow.question}</Text>
-                </Box>
-                {ear.looking.includes(nowRow.question) && <Text dimColor>checking the repository …</Text>}
-                {ear.deep[nowRow.question] && <Text dimColor>from the repository</Text>}
-                {byRisk(nowRow).map(answerRow)}
-              </>
+              card(nowRow)
             ) : (
-              <Text dimColor>no question recognised yet</Text>
+              <Text dimColor>{ear.phase === 'detecting' || ear.phase === 'answering' ? `listening · ${ear.phase} …` : 'listening …'}</Text>
             )}
           </Box>
         )}
-        {/* True whatever is asked: what I worked on last, to fall back on when no answer above fits. */}
-        {recent.length > 0 && (
-          <Box key="safe" flexDirection="column">
-            {heading(`SAFE TO SAY · MY RECENT WORK · ${recent.length}`)}
-            {recent.map((f, j) => (
-              <Box key={`f${j}`} flexDirection="column" marginTop={1}>
-                <Text color="success">● {f.text}</Text>
-                {f.source && <Box paddingLeft={2}>{sourceOf(f.source, 'Source:', `fs${j}`)}</Box>}
-              </Box>
-            ))}
-          </Box>
-        )}
-        {waiting > 0 && (
-          <Button
-            key="sync"
-            variant="primary"
-            label={`↻ take ${waiting} new`}
-            onPress={() => update($, held, () => ({ next: ear.next, added: ear.added }))}
-          />
-        )}
-        {nextRows.length > 0 && (
+        {(upNext.length > 0 || waiting > 0) && (
           <Box key="next" flexDirection="column">
-            {heading(`LIKELY NEXT · ${nextRows.length}`)}
-            {nextRows.map(q => questionRow(q, true))}
-          </Box>
-        )}
-        {addedRows.length > 0 && (
-          <Box key="new" flexDirection="column">
-            {heading(`ASKED IN THE MEETING, NOT PREPARED · ${addedRows.length}`)}
-            {addedRows.map(q => questionRow(q, true))}
-          </Box>
-        )}
-        {listed.map(g => (
-          <Box key={g.label} flexDirection="column">
-            {heading(`${g.label.toUpperCase()} · ${g.items.length}`)}
-            {g.items.map(q => questionRow(q))}
-          </Box>
-        ))}
-        {asked.length > 0 && (
-          <Box key="asked" flexDirection="column">
-            {heading(`ALREADY ASKED · ${asked.length}`)}
-            {asked.map(q => questionRow(q))}
+            <Text dimColor wrap="truncate">{rule}</Text>
+            <Box flexDirection="row" justifyContent="space-between" columnGap={1}>
+              <Text bold dimColor>
+                UP NEXT · FOR YOU · {upNext.length}
+              </Text>
+              {waiting > 0 && (
+                <Button key="sync" variant="primary" label={`↻ take ${waiting} new`} onPress={() => update($, held, () => ({ next: ear.next, added: ear.added }))} />
+              )}
+            </Box>
+            {upNext.map(q => questionRow(q, true))}
           </Box>
         )}
         {/* Nothing prepared, nothing heard: offer where to start instead of an empty pane. */}
@@ -1008,10 +1071,37 @@ export const register: Register = on => {
             <Text dimColor>Or just Listen live: questions then come from the live transcript only, answers from this repository.</Text>
           </Box>
         )}
-        {set.sources.length > 0 && (
-          <Box key="sources" flexDirection="column">
-            {heading('SOURCES')}
-            {(Object.keys(SOURCE_KINDS) as SourceKind[]).map(kind => {
+        {/* True whatever is asked: what I worked on last, to fall back on when no answer above fits. */}
+        {recent.length > 0 &&
+          fold('safe', `SAFE TO SAY · MY RECENT WORK · ${recent.length}`, () =>
+            recent.map((f, j) => (
+              <Box key={`f${j}`} flexDirection="column" marginTop={1}>
+                <Text color="success">● {f.text}</Text>
+                {f.source && <Box paddingLeft={2}>{sourceOf(f.source, 'Source:', `fs${j}`)}</Box>}
+              </Box>
+            )),
+          )}
+        {earlier.length > 0 && fold('earlier', `ASKED EARLIER · ${earlier.length}`, () => earlier.map(q => questionRow(q, true)))}
+        {set.questions.length > 0 &&
+          fold('prepared', `PREPARED · ${set.questions.length} · ${sorting}`, () => (
+            <>
+              {listed.map(g => (
+                <Box key={g.label} flexDirection="column">
+                  {heading(`${g.label.toUpperCase()} · ${g.items.length}`)}
+                  {g.items.map(q => questionRow(q))}
+                </Box>
+              ))}
+              {asked.length > 0 && (
+                <Box key="asked" flexDirection="column">
+                  {heading(`ALREADY ASKED · ${asked.length}`)}
+                  {asked.map(q => questionRow(q))}
+                </Box>
+              )}
+            </>
+          ))}
+        {set.sources.length > 0 &&
+          fold('sources', `SOURCES · ${set.sources.length}`, () =>
+            (Object.keys(SOURCE_KINDS) as SourceKind[]).map(kind => {
               const items = set.sources.map(asSource).filter(src => src.kind === kind)
               return items.length === 0 ? null : (
                 <Box key={`k${kind}`} flexDirection="column" marginTop={1}>
@@ -1019,9 +1109,8 @@ export const register: Register = on => {
                   {items.map((src, k) => sourceOf(src.label, '•', `s${kind}${k}`))}
                 </Box>
               )
-            })}
-          </Box>
-        )}
+            }),
+          )}
       </Box>
     )
   })
