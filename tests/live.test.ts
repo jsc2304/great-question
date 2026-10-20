@@ -337,6 +337,7 @@ const listening = async ($: Parameters<Parameters<typeof test>[1]>[0], on: On, f
     const out = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '' } }) as never
     if (args === 'git var GIT_AUTHOR_IDENT') return out('Alex Example <alex@example.com> 1760000000 +0200')
     if (args === 'git log --oneline -15' && files['git log']) return out(files['git log'])
+    if (args === 'git rev-parse --path-format=absolute --git-common-dir' && files['git common dir']) return out(files['git common dir'])
     return out('', 1)
   })
   await $.session.start({ cwd: '/repo' } as never)
@@ -429,6 +430,24 @@ test('the briefing from the folder\'s memory and commits joins the knowledge; wi
   expect(known).not.toContain('oldest day')
   expect(known).not.toContain('how to write a log')
   expect(known).toContain('git log --oneline -15:\nabc1234 Fix the publish rule')
+})
+
+test('the Second Brain hub leads the briefing with status, open threads and tickets; a worktree finds its main checkout\'s hub', async ($, on) => {
+  const hub = '/h/projects/second-brain/projects/step-bosch-mocca/step-bosch-mocca.md'
+  const { clock, say, prompts } = await listening($, on, {
+    'git common dir': '/src/step-bosch-mocca/.git',
+    [hub]: '# hub\n\n## Überblick\n\nabout\n\n## Status (Stand 2026-10-20)\n\n- 2026-10-20: 7810 on TRNG\n\n## Offene Fäden\n\n- [ ] [MOCCAIMPLEMENTATION-7810] PRE test\n\n## Tickets (Stand 2026-10-20)\n\n| MOCCAIMPLEMENTATION-7810 | In Progress |\n\n## Sessions\n\n- old session\n',
+    '/repo/memory/MEMORY.md': 'Focus: 7810',
+  })
+  say('What is the status of 7810?')
+  await clock.advance(3_000)
+  const known = prompts[0]![0]!.text
+  expect(known).toContain("(briefing):\nSecond Brain hub (it wins where others disagree on a ticket's state):\n## Status (Stand 2026-10-20)")
+  expect(known).toContain('- [ ] [MOCCAIMPLEMENTATION-7810] PRE test')
+  expect(known).toContain('| MOCCAIMPLEMENTATION-7810 | In Progress |')
+  expect(known.indexOf('## Tickets')).toBeLessThan(known.indexOf('memory/MEMORY.md:'))
+  expect(known).not.toContain('about')
+  expect(known).not.toContain('old session')
 })
 
 test('without memory files or commits there is no briefing', async ($, on) => {

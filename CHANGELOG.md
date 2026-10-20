@@ -2,6 +2,18 @@
 
 Versions follow semantic versioning. Newest release first.
 
+## 0.14.0 — 2026-10-20
+
+**Update the mod and run `/reload-plugins`; nothing else to do.** A project without a Second Brain hub listens as before.
+
+### Added
+
+- While listening, the briefing starts with the project's Second Brain hub, `~/projects/second-brain/projects/<repo>/<repo>.md`: its sections "Status", "Offene Fäden" and "Tickets", at most 8,000 characters. Where the hub and the other sources disagree on a ticket's state, the answers follow the hub. A worktree reads the hub of its main checkout.
+
+### Changed
+
+- The briefing may be 24,000 characters instead of 16,000, so the hub does not push the memory file, the daily logs and the commits out.
+
 ## 0.13.0 — 2026-10-19
 
 **Update the mod and run `/reload-plugins`; nothing else to do.**

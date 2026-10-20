@@ -431,22 +431,33 @@ const transcript = async ($: EngineInterface, path: string, mtimeMs: number) => 
 // What the repository says is current, by folder, read at most once a minute.
 let briefed: { folder: string; at: number; text: string } | null = null
 
-/** The folder's memory file, its two newest daily logs and its last commits, newest first; nothing where they are missing. */
+/**
+ * The repository's Second Brain hub (status, open threads, tickets), then the folder's memory file, its two newest daily
+ * logs and its last commits, newest first; nothing where they are missing.
+ */
 const readBriefing = async ($: EngineInterface, folder: string, now: number) => {
   if (briefed?.folder === folder && now - briefed.at < BRIEF_MS) return briefed.text
   const head = async (path: string, max: number) =>
     (await $.fs.exists(path).catch(() => false)) ? String((await $.fs.read(path).catch(() => '')) ?? '').slice(0, max) : ''
+  // The hub is named after the main checkout's folder, so a worktree finds the same one.
+  const common = await git($, ['rev-parse', '--path-format=absolute', '--git-common-dir'], folder).catch(() => null)
+  const repo = (common?.replace(/\/\.git$/, '') ?? folder).split('/').pop()
+  const hub = (await head(`${await $.env.get('HOME')}/projects/second-brain/projects/${repo}/${repo}.md`, 200_000))
+    .split(/^(?=## )/m)
+    .filter(s => /^## (Status|Offene Fäden|Tickets)\b/.test(s))
+    .join('')
   const logs = `${folder}/memory/daily-logs`
   // Dated names sort by day; a README beside them is no log.
   const days = (await $.fs.exists(logs).catch(() => false))
     ? (await $.fs.list(logs).catch(() => [])).filter(e => e.kind === 'file' && /^\d/.test(e.name)).map(e => e.name).sort().reverse().slice(0, 2)
     : []
   const parts: [string, string][] = [
+    ['Second Brain hub (it wins where others disagree on a ticket\'s state)', hub.slice(0, 8_000)],
     ['memory/MEMORY.md', await head(`${folder}/memory/MEMORY.md`, 6_000)],
     ...(await Promise.all(days.map(async d => [`memory/daily-logs/${d}`, await head(`${logs}/${d}`, 3_000)] as [string, string]))),
     ['git log --oneline -15', (await git($, ['log', '--oneline', '-15'], folder).catch(() => null)) ?? ''],
   ]
-  const text = parts.filter(([, t]) => t.trim()).map(([label, t]) => `${label}:\n${t.trim()}`).join('\n\n').slice(0, 16_000)
+  const text = parts.filter(([, t]) => t.trim()).map(([label, t]) => `${label}:\n${t.trim()}`).join('\n\n').slice(0, 24_000)
   briefed = { folder, at: now, text }
   return text
 }
