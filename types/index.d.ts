@@ -96,6 +96,8 @@ declare module 'claude-code' {
       quality: Quality
       live: Live
       version: string
+      /** The set a fresh session found stored for its folder, offered on the start screen; null when there is none. */
+      previous: { title: string; count: number; generatedAt: string; folder: string } | null
       /** Sections whose fold is the opposite of their default: 'safe', 'earlier', 'prepared', 'sources'. Listening folds all four; paused, 'prepared' and 'safe' stand open. */
       toggled: string[]
     }

@@ -52,6 +52,8 @@ const sortBy = atom({ plugin: 'great-question', key: 'sortBy' } as const, 'confi
 const lang = atom({ plugin: 'great-question', key: 'lang' } as const, 'auto')
 const LANGS: Lang[] = ['auto', 'de', 'en']
 const version = atom({ plugin: 'great-question', key: 'version' } as const, '')
+// The set a fresh session finds stored for its folder: offered on the start screen, not shown until asked for.
+const previous = atom({ plugin: 'great-question', key: 'previous' } as const, null)
 // Sections folded the other way round from their default; see `isUnfolded` in the pane.
 const toggled = atom({ plugin: 'great-question', key: 'toggled' } as const, [])
 
@@ -219,6 +221,12 @@ Language: ${language === 'auto' ? 'Write "question" and the answer "text"s in th
 
 const storeKey = async ($: EngineInterface) => `set:${await $.session.cwd()}`
 
+/** The set stored for a folder, in today's shape; sets from before 0.10 carry no folder: the one they are stored under is it. */
+const storedSet = async ($: EngineInterface, folder: string) => {
+  const saved = (await $.store.get(`set:${folder}`)) as QuestionSet | undefined
+  return saved && toSet(saved as unknown as Record<string, unknown>, saved.generatedAt, saved.folder ?? folder)
+}
+
 /** One git command's output, trimmed; null when git says no. A command that cannot run at all throws. */
 const git = async ($: EngineInterface, args: readonly string[], cwd: string) => {
   const ran = await $.process.run(['git', ...args], { cwd, timeoutMs: 5000 })
@@ -334,6 +342,16 @@ export const fromReply = (reply: string, generatedAt: string, folder?: string): 
   } catch {
     return null
   }
+}
+
+/** Shows the set a fresh session found stored, every row closed; nothing happens when it has gone. */
+const showPrevious = async ($: EngineInterface) => {
+  const found = await read($, previous)
+  const set = found && (await storedSet($, found.folder))
+  if (!set) return
+  await update($, current, () => set)
+  await setOpen($, () => [])
+  await linkAll($, setLabels(set), set.folder)
 }
 
 /** Stores prepared questions for this folder and shows them, the surest one open. */
@@ -751,6 +769,15 @@ export const register: Register = on => {
     await update($, preparing, () => null)
     // Answers 0.10.2 and earlier kept as the model wrote them: an object among them blanked the pane, so they are cleaned here too.
     const cleaned = (deep: Live['deep'] = {}) => Object.fromEntries(Object.entries(deep).map(([q, list]) => [q, toAnswers(list)]))
+    // A fresh session starts clean, on the start screen. Only a running listener stays: a reload mid-meeting must not drop it.
+    // ponytail: no event tells a reload from a new session; a listener left on in an old session resumes until paused
+    const isMeeting = (await read($, live)).isOn
+    if (!isMeeting) {
+      await update($, live, () => IDLE)
+      await update($, held, () => null)
+      await update($, opened, () => [])
+      await update($, current, () => null)
+    }
     await update($, live, l => ({ ...IDLE, ...l, added: withRisks(l.added ?? []), next: withRisks(l.next ?? []), deep: cleaned(l.deep), looking: [] }))
     await update($, held, h => h && { next: withRisks(h.next), added: withRisks(h.added) })
     // Questions on show from before 0.10 know no folder: the key they are stored under names it.
@@ -764,11 +791,11 @@ export const register: Register = on => {
         }
       }
     }
-    const saved = (await $.store.get(await storeKey($))) as QuestionSet | undefined
+    const folder = await $.session.cwd()
+    const saved = await storedSet($, folder)
+    await update($, previous, () => (saved ? { title: saved.title, count: saved.questions.length, generatedAt: saved.generatedAt, folder } : null))
     if (saved) {
-      // Sets from before 0.10 carry no folder: the one they are stored under is it.
-      const set = toSet(saved as unknown as Record<string, unknown>, saved.generatedAt, saved.folder ?? (await $.session.cwd()))
-      await update($, current, () => set)
+      if (isMeeting) await update($, current, () => saved)
       void $.ui.open({ id: PANE, title: 'Great Question' })
     }
 
@@ -859,6 +886,7 @@ export const register: Register = on => {
     // Spread over IDLE: a value from an older version of the mod may lack newer fields.
     const ear: Live = { ...IDLE, ...(await read($, live)) }
     const shown = await read($, version)
+    const lastTime = await read($, previous)
     const recent = recentOf(stored, ear)
     const hasLive = ear.asked.length + ear.added.length + ear.next.length > 0
 
@@ -873,6 +901,13 @@ export const register: Register = on => {
         <Text bold dimColor>{text}</Text>
       </>
     )
+    // Stopping only pauses: what the call produced stays until Clear; a new recording starts afresh.
+    const toggleEar = () =>
+      update($, live, l => ({
+        ...l,
+        isOn: !l.isOn,
+        status: l.isOn ? `paused · ${l.lines} utterances read · results stay` : 'starting …',
+      }))
     const isOpen = (q: Question) => openList.includes(q.question)
     const toggle = (q: Question) => setOpen($, list => (list.includes(q.question) ? list.filter(t => t !== q.question) : [...list, q.question]))
     const answerRow = (a: Answer, j: number) => (
@@ -1080,14 +1115,7 @@ export const register: Register = on => {
               key="ear"
               variant={ear.isOn ? 'primary' : 'secondary'}
               label={earLabel}
-              // Stopping only pauses: what the call produced stays until Clear; a new recording starts afresh.
-              onPress={() =>
-                update($, live, l => ({
-                  ...l,
-                  isOn: !l.isOn,
-                  status: l.isOn ? `paused · ${l.lines} utterances read · results stay` : 'starting …',
-                }))
-              }
+              onPress={toggleEar}
             />
             <Button key="gen" label={prep ? 'Finding …' : 'Find likely questions'} onPress={() => startPrep($, '')} />
             {rows.length > 0 && !isAllOpen && <Button key="open-all" label="Open all" onPress={() => setOpen($, () => rows.map(q => q.question))} />}
@@ -1173,11 +1201,23 @@ export const register: Register = on => {
             {upNext.map(q => questionRow(q, true))}
           </Box>
         )}
-        {/* Nothing prepared, nothing heard: offer where to start instead of an empty pane. */}
+        {/* A fresh session: nothing shown yet, three ways to start. */}
         {!stored && !prep && !ear.isOn && !hasLive && (
           <Box key="welcome" flexDirection="column" borderStyle="round" paddingX={1} rowGap={1}>
             <Text bold>Where do you want to start?</Text>
+            {lastTime && (
+              <Box flexDirection="column">
+                <Text dimColor>Earlier in this folder</Text>
+                <Button
+                  key="start-previous"
+                  plain
+                  label={`▸ Show the questions from the previous session: ${lastTime.title} · ${lastTime.count} prepared${lastTime.generatedAt ? ` · ${lastTime.generatedAt} UTC` : ''}`}
+                  onPress={() => showPrevious($)}
+                />
+              </Box>
+            )}
             <Box flexDirection="column">
+              <Text dimColor>Prepare new questions in the background</Text>
               <Button
                 key="start-repo"
                 plain
@@ -1196,7 +1236,11 @@ export const register: Register = on => {
               />
               <Button key="start-daily" plain label="▸ Prepare today's daily" onPress={() => startPrep($, "today's daily stand-up", "today's daily")} />
             </Box>
-            <Text dimColor>Or just Listen live: questions then come from the live transcript only, answers from this repository.</Text>
+            <Box flexDirection="column">
+              <Text dimColor>Or just listen to the meeting</Text>
+              <Button key="start-listen" plain label="▸ Listen live" onPress={toggleEar} />
+              <Text dimColor>Questions then come from the live transcript only, answers from this repository.</Text>
+            </Box>
           </Box>
         )}
         {/* True whatever is asked: what I worked on last, to fall back on when no answer above fits. */}
