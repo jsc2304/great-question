@@ -2,7 +2,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 import { rowKey } from '../hooks/live'
-import { fromReply } from '../hooks/register'
+import { conversationOf, fromReply } from '../hooks/register'
 
 const bottoms = (on: On, cwd: () => string = () => '/repo') => {
   mock.store(on)
@@ -327,6 +327,7 @@ test('Find likely questions starts a background agent with a JSON task; without 
   on('agent.spawn', ($, e) => (spawned.push(e.prompt), { model: 'opus' }) as never)
   on('prompt.submit', ($, e) => (prompts.push(e.text), { text: e.text }) as never)
   on('ui.toast', () => ({ value: undefined }) as never)
+  on('session.messages', () => ({ value: [{ role: 'user', text: 'Estimate subtask 4', toolUses: [] }, { role: 'assistant', text: 'About 3-5 days', toolUses: [] }] }) as never)
   await $.session.start({ cwd: '/repo' } as never)
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   expect(await ui.find({ key: 'gen', text: 'Find likely questions' })).toBeDefined()
@@ -335,9 +336,23 @@ test('Find likely questions starts a background agent with a JSON task; without 
   expect(spawned).toHaveLength(1)
   expect(spawned[0]).toContain('Reply with one JSON object only')
   expect(spawned[0]).not.toContain('Load the tool')
+  expect(spawned[0]).toContain('User: Estimate subtask 4\n\nAssistant: About 3-5 days')
   // The kit's answer to agent.spawn starts no agent (the engine sets its id), so the session takes over here.
   expect(prompts).toHaveLength(1)
   expect(prompts[0]).toContain('Load the tool mcp__great-question__show_questions')
+  // The session itself has the conversation; it is not pasted in again.
+  expect(prompts[0]).not.toContain('<conversation>')
+})
+
+test('the conversation for the background agent keeps text only and cuts the oldest part', async () => {
+  const messages = [
+    { role: 'user', text: 'first' },
+    { role: 'assistant', text: '' },
+    { role: 'assistant', text: 'second' },
+  ]
+  expect(conversationOf(messages)).toBe('User: first\n\nAssistant: second')
+  expect(conversationOf(messages, 6)).toBe('…second')
+  expect(conversationOf([])).toBe('')
 })
 
 test('with nothing prepared the pane offers where to start; a start names the folder', async ($, on) => {

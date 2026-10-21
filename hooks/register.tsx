@@ -189,8 +189,20 @@ const SCHEMA = {
 const REPLY_AS_JSON = `Reply with one JSON object only, no text before or after it, in this shape (JSON Schema): ${JSON.stringify(SCHEMA)}`
 const CALL_THE_TOOL = `Load the tool ${TOOL} with ToolSearch and call it with the result. Afterwards, only one line in the chat.`
 
-const prepPrompt = (occasion: string, language: Lang, finish: string) => `Great Question: find the likely questions${occasion ? ` for: ${occasion}` : ''}.
+// How much of the session's conversation the background agent gets, newest kept.
+const CONVERSATION_CHARS = 12_000
 
+/** The session's conversation as plain text, newest last, cut from the front to `max` characters; tool calls left out. */
+export const conversationOf = (messages: { role: string; text: string }[], max = CONVERSATION_CHARS) => {
+  const text = messages
+    .filter(m => m.text.trim())
+    .map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.text.trim()}`)
+    .join('\n\n')
+  return text.length > max ? `…${text.slice(-max)}` : text
+}
+
+const prepPrompt = (occasion: string, language: Lang, finish: string, conversation = '') => `Great Question: find the likely questions${occasion ? ` for: ${occasion}` : ''}.
+${conversation ? `\nThe session's conversation so far (user and assistant text, tool calls left out, oldest part cut). It is context like the other sources: what was worked out here (estimates, decisions, open points) may come up; name it as source "this session's conversation".\n<conversation>\n${conversation}\n</conversation>\n` : ''}
 Language: ${language === 'auto' ? 'Write "question" and the answer "text"s in the language the meeting is held in (invitation, slides, earlier transcripts with the other side); if unsure, German.' : languageRule(language)} who, why, answerer, note and title in English. Return the language used as "language".
 
 1. Choose the mode. Is a pitch, presentation or meeting coming up (slides, pitch preparation, agenda, calendar entry, occasion above)? Then "pitch" or "meeting". Otherwise "standup": daily stand-up preparation from the commits and pull requests of the last working days, open and own issues/tickets, blockers.
@@ -295,8 +307,10 @@ const startPrep = async ($: EngineInterface, occasion: string, label = occasion)
   }
   const language = await read($, lang)
   const cwd = await $.session.cwd()
+  // The agent starts fresh; the fallback below runs in the session and sees the conversation itself.
+  const conversation = conversationOf(await $.session.messages().catch(() => []))
   const spawned = await $.agent
-    .spawn({ prompt: prepPrompt(occasion.trim(), language, REPLY_AS_JSON), description: 'Great Question: finding likely questions', subagentType: 'general-purpose' })
+    .spawn({ prompt: prepPrompt(occasion.trim(), language, REPLY_AS_JSON, conversation), description: 'Great Question: finding likely questions', subagentType: 'general-purpose' })
     .catch(() => null)
   if (!spawned || !('agentId' in spawned) || !spawned.agentId) {
     void $.prompt.submit({ text: prepPrompt(occasion.trim(), language, CALL_THE_TOOL) })
@@ -1132,7 +1146,7 @@ export const register: Register = on => {
             <Text color="warning">
               {frame} Finding likely questions{prep.occasion ? ` for ${prep.occasion}` : ''} · {Math.floor(took / 60)}:{String(took % 60).padStart(2, '0')}
             </Text>
-            <Text dimColor>In the background, from the repository and connected sources; the session stays free.</Text>
+            <Text dimColor>In the background, from the repository, connected sources and this conversation; the session stays free.</Text>
           </Box>
         )}
         {ear.status && !isHeard && <Text dimColor>{ear.status}</Text>}

@@ -2,6 +2,14 @@
 
 Versions follow semantic versioning. Newest release first.
 
+## 0.15.0 — 2026-10-21
+
+**Update the mod and run `/reload-plugins`; nothing else to do.**
+
+### Changed
+
+- Finding likely questions in the background now also reads the session's conversation: the newest 12,000 characters of what you and Claude wrote, without tool output. Estimates, decisions and open points worked out in the session become context for the questions and answers, cited as "this session's conversation". The panel's hint names the conversation as a source.
+
 ## 0.14.0 — 2026-10-20
 
 **Update the mod and run `/reload-plugins`; nothing else to do.** A project without a Second Brain hub listens as before.

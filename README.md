@@ -110,7 +110,7 @@ Sources and the sources of answers are links where they point somewhere: a URL, 
 Buttons in the panel:
 
 - **Listen live**: checks the running Wispr Flow recording every 3 seconds and shows the question asked now as a card, **UP NEXT · FOR YOU**, **SAFE TO SAY · MY RECENT WORK** and **ASKED EARLIER**. While listening, the button carries the status, for example "◉ Listening · 212 utterances · 12 s ago". Switching it off only pauses.
-- **Find likely questions**: like `/great-question-prep` without an occasion. A background agent reads the repository and connected sources while your session stays free; the panel shows a turning ◐ with the time taken, and the questions appear when it is done.
+- **Find likely questions**: like `/great-question-prep` without an occasion. A background agent reads the repository, connected sources and the newest 12,000 characters of this session's conversation (text only, no tool output) while your session stays free; the panel shows a turning ◐ with the time taken, and the questions appear when it is done.
 - **Open all** and **Close all**: open or close every visible question. **Close all** shows as soon as one question is open and closes them all at once.
 - **More**: shows the less frequent settings and actions:
   - **Language: Auto / DE / EN** of questions and answers. *Auto* uses the language the meeting is held in (from the invitation, slides and earlier transcripts when generating, from the conversation when listening). Applies to everything generated from then on, live included; nothing already shown is translated. Notes and reasons are in English.
