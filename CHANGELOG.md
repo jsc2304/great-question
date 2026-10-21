@@ -2,6 +2,15 @@
 
 Versions follow semantic versioning. Newest release first.
 
+## 0.16.0 — 2026-10-21
+
+**Update the mod and run `/reload-plugins`; nothing else to do.**
+
+### Changed
+
+- A new session starts on the start screen instead of reopening the previous one. The panel shows nothing from the last session, neither the stored questions nor the rows heard live, and asks where to start: **show the questions from the previous session** (only where one is stored for the folder, with its title, count and date), **prepare new questions** (this repository, my next meeting, today's daily) or **listen live**. The stored questions stay on the computer and one click brings them back.
+- A listener that is running when the mod loads again, for example after `/reload-plugins` during a meeting, keeps listening and keeps its rows.
+
 ## 0.15.0 — 2026-10-21
 
 **Update the mod and run `/reload-plugins`; nothing else to do.**

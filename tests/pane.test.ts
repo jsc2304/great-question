@@ -443,11 +443,11 @@ test('a reply whose note or source is not text cannot blank the pane', async ($,
 
 test('a pane blanked by answers 0.10.2 kept draws again once the mod loads anew', async ($, on) => {
   bottoms(on)
-  // What 0.10.2 could keep: the question asked now, its lookup's answer with an object note.
+  // What 0.10.2 could keep: the question asked now, its lookup's answer with an object note. Listening, so a restart keeps it.
   const bad = [{ text: 'Somehow', risk: 'vague', note: { why: 'x' } }]
   let isOld = true
   on('state.set', ($, e, next) =>
-    next(isOld && e.key === 'live' ? ({ ...e, value: { ...(e.value as object), current: 'How?', added: [{ question: 'How?', relevance: 3, answers: bad }], deep: { 'How?': bad } } } as never) : e))
+    next(isOld && e.key === 'live' ? ({ ...e, value: { ...(e.value as object), isOn: true, current: 'How?', added: [{ question: 'How?', relevance: 3, answers: bad }], deep: { 'How?': bad } } } as never) : e))
   await $.session.start({ cwd: '/repo' } as never)
   isOld = false
   await expect($.ui.mount({ ...PANE, surface: 'desktop' })).rejects.toThrow(/refused/)
@@ -621,5 +621,46 @@ test('the Model button sets who answers live and how hard it thinks', async ($, 
   expect(spawned[0]?.model).toBe('sonnet')
   await ui.press({ key: 'quality' })
   expect(await ui.find({ key: 'quality', text: /Model: Fast/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a fresh session starts on the start screen: the stored set waits behind a button, old live rows are gone', async ($, on) => {
+  bottoms(on)
+  // The last session left a live row behind.
+  let isOld = true
+  on('state.set', ($, e, next) =>
+    next(isOld && e.key === 'live' ? ({ ...e, value: { ...(e.value as object), added: [{ question: 'Old live question?', relevance: 3, answers: [] }] } } as never) : e))
+  await $.session.start({ cwd: '/repo' } as never)
+  isOld = false
+  await $.tool.call({ tool: 'mcp__great-question__show_questions', ...SET })
+  // The next session in the same folder.
+  await $.session.start({ cwd: '/repo' } as never)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await ui.find({ text: 'Where do you want to start?' })).toBeDefined()
+  expect(await ui.find({ key: 'start-previous', text: /Pitch Test · 2 prepared/ })).toBeDefined()
+  expect(await ui.find({ key: 'start-listen' })).toBeDefined()
+  expect(await ui.find({ text: 'Who is on the team?' })).toBeUndefined()
+  expect(await ui.find({ text: 'Old live question?' })).toBeUndefined()
+  await ui.press({ key: 'start-previous' })
+  expect(await ui.find({ text: 'Where do you want to start?' })).toBeUndefined()
+  expect(await ui.find({ key: 'fold:prepared', text: '▾ PREPARED · 2 · surest first' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('Listen live on the start screen starts listening; a running listener survives a restart', async ($, on) => {
+  const clock = bottoms(on)
+  mock.env(on, { HOME: '/h' })
+  on('fs.list', () => ({ value: [{ kind: 'dir', name: 'm1' }] }) as never)
+  on('fs.exists', () => ({ value: true }) as never)
+  on('fs.stat', () => ({ value: { mtimeMs: clock.now() } }) as never)
+  on('fs.read', () => ({ value: '' }) as never)
+  await $.session.start({ cwd: '/repo' } as never)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'start-listen' })
+  expect(await ui.find({ key: 'ear', text: /Listening|L/ })).toBeDefined()
+  expect(await ui.find({ text: 'Where do you want to start?' })).toBeUndefined()
+  // A reload in the middle of a meeting keeps listening.
+  await $.session.start({ cwd: '/repo' } as never)
+  expect(await ui.find({ key: 'ear', variant: 'primary' })).toBeDefined()
   await ui.unmount()
 })
