@@ -615,8 +615,8 @@ test('the Model button sets who answers live and how hard it thinks', async ($, 
   await ui.press({ key: 'ear' })
   lines = 1
   await clock.advance(3_000)
-  // Finding the questions is always quick; the level decides who answers them.
-  expect(asked[0]).toEqual({ model: 'haiku', effort: 'low', timeoutMs: 15_000 })
+  // Finding the questions always thinks little; the level picks the model for that and for the answers.
+  expect(asked[0]).toEqual({ model: 'sonnet', effort: 'low', timeoutMs: 15_000 })
   expect(asked[1]).toEqual({ model: 'sonnet', effort: 'high', timeoutMs: 90_000 })
   expect(spawned[0]?.model).toBe('sonnet')
   await ui.press({ key: 'quality' })
