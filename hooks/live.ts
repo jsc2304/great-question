@@ -249,6 +249,21 @@ export const applyReply = (live: Live, set: QuestionSet | null, reply: string, n
   return { ...live, asked: [...asked], current, added, next, pending, phase: pending.length ? 'answering' : 'ready', currentAt, steppedAt: now }
 }
 
+/**
+ * One training row for a local decision model such as Laya: what a detect step read and what it decided, with the
+ * questions listed before it. Only for a reply `applyReply` took, so it parses.
+ */
+export const labelOf = (now: number, meeting: string, me: string, set: QuestionSet | null, live: Live, tail: string, reply: string) => ({
+  at: new Date(now).toISOString(),
+  meeting: meeting.split('/').at(-2) ?? meeting,
+  me,
+  tail,
+  set: (set?.questions ?? []).map(q => q.question),
+  added: live.added.map(q => q.question),
+  next: live.next.map(q => q.question),
+  decided: JSON.parse(reply.slice(reply.indexOf('{'), reply.lastIndexOf('}') + 1)) as unknown,
+})
+
 const MAX_HITS = 8
 
 /** git grep for a question's words in the session's repository; this mod's exports stay out, they hold earlier answers. */

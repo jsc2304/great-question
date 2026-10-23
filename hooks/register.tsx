@@ -14,6 +14,7 @@ import {
   grepArgs,
   ground,
   isTrigger,
+  labelOf,
   knowledge,
   languageRule,
   logArgs,
@@ -544,7 +545,17 @@ const lookUp = async ($: EngineInterface, question: string, set: QuestionSet | n
 }
 
 /**
- * One listening tick: read the transcript when it changed and, when the new lines may hold a question (or have waited
+ * Appends a detect step's decisions to `~/.claude/great-question/labels/<day>.jsonl`, training data for a local decision
+ * model. Only where that folder exists: the rows hold the meeting's words, so nobody gets them without asking.
+ */
+const saveLabel = async ($: EngineInterface, label: ReturnType<typeof labelOf>) => {
+  const dir = `${await $.env.get('HOME')}/.claude/great-question/labels`
+  if (!(await $.fs.exists(dir))) return
+  await $.process.run(['sh', '-c', 'cat >> "$1"', 'sh', `${dir}/${label.at.slice(0, 10)}.jsonl`], { stdin: `${JSON.stringify(label)}\n`, timeoutMs: 5000 })
+}
+
+/**
+ * One listening tick:read the transcript when it changed and, when the new lines may hold a question (or have waited
  * STEP_MS), run a step. A step first lets a small model find who asks what (DETECT) and paints that, then writes the
  * answers for every question still waiting (ANSWER) while a subagent looks up the question asked now.
  */
@@ -597,6 +608,7 @@ const listen = async ($: EngineInterface) => {
     await update($, live, l => (l.isOn ? { ...l, status: why, phase: l.pending.length ? 'answering' : 'listening' } : l))
     return
   }
+  void saveLabel($, labelOf(now, path, me.name, set, base, tail, text)).catch(() => {})
   const heardNow = { lines: total, changedAt: mtimeMs, recent: me.recent }
   // Folded into the state as it stands now: answers, lookups and rows an earlier step's answer call wrote meanwhile stay.
   const step = await update($, live, l => {

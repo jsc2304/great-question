@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { IDLE, applyAnswers, detectTask, githubBase, ground, isTrigger, knowledge, logArgs, parseIdent, parseLog, parseSource, recentOf, settleLookup, applyReply, asRisk, grepArgs, isSameQuestion, parseAnswers, parseTranscript, rowKey, topHits } from '../hooks/live'
+import { IDLE, applyAnswers, detectTask, githubBase, ground, isTrigger, knowledge, labelOf, logArgs, parseIdent, parseLog, parseSource, recentOf, settleLookup, applyReply, asRisk, grepArgs, isSameQuestion, parseAnswers, parseTranscript, rowKey, topHits } from '../hooks/live'
 import type { Live, QuestionSet } from '../types'
 
 const SET: QuestionSet = {
@@ -519,4 +519,15 @@ test('a question for someone else lands in the list but does not take the place 
   const all = applyReply(other, null, JSON.stringify({ new: [{ question: 'Does anyone have news on PRE?', to: 'all' }], current: { new: 0 } }), 4_000)
   expect(all.current).toBe('Does anyone have news on PRE?')
   expect(all.currentAt).toBe(4_000)
+})
+
+test('labelOf keeps what the detect step read and decided, with the meeting folder as its id', () => {
+  const before = { ...IDLE, isOn: true, next: [{ question: 'When live?', relevance: 3, confidence: 2, answers: [] }] }
+  const reply = 'ok {"asked": [1], "new": [], "current": {"set": 1}, "next": []}'
+  const label = labelOf(Date.UTC(2026, 9, 23, 9), '/x/meetings/abc-123/live.ndjson', 'Jan', SET, before, '> [t] Call: Who leads?', reply)
+  expect(label.at).toBe('2026-10-23T09:00:00.000Z')
+  expect(label.meeting).toBe('abc-123')
+  expect(label.set).toEqual(['What does it cost?', 'Who leads?'])
+  expect(label.next).toEqual(['When live?'])
+  expect(label.decided).toEqual({ asked: [1], new: [], current: { set: 1 }, next: [] })
 })
