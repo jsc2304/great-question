@@ -1,0 +1,1 @@
+{ "name": "great-question-bench", "version": "0.0.0", "description": "Runs detect prompts through the engine for scripts/bench/bench.ts" }
