@@ -600,7 +600,7 @@ const listen = async ($: EngineInterface) => {
     timeoutMs: 15_000,
   })
   const text = reply.isAnswered ? reply.text : ''
-  const applied = reply.isAnswered ? applyReply(base, set, text, now) : base
+  const applied = reply.isAnswered ? applyReply(base, set, text, now, fresh) : base
   // No answer, or not the asked-for JSON: the lines stay unread, so a step after RETRY_MS tries them again.
   if (applied === base) {
     retryAt = now + RETRY_MS
@@ -613,7 +613,7 @@ const listen = async ($: EngineInterface) => {
   // Folded into the state as it stands now: answers, lookups and rows an earlier step's answer call wrote meanwhile stay.
   const step = await update($, live, l => {
     if (!l.isOn) return l
-    const folded = l.meeting === path ? applyReply({ ...IDLE, ...l }, set, text, now) : applied
+    const folded = l.meeting === path ? applyReply({ ...IDLE, ...l }, set, text, now, fresh) : applied
     return { ...folded, ...heardNow, status: reading({ ...folded, pending: [] }) }
   })
   if (!step.isOn) return

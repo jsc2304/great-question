@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { IDLE, applyAnswers, detectTask, githubBase, ground, isTrigger, knowledge, labelOf, logArgs, parseIdent, parseLog, parseSource, recentOf, settleLookup, applyReply, asRisk, grepArgs, isSameQuestion, parseAnswers, parseTranscript, rowKey, topHits } from '../hooks/live'
+import { IDLE, applyAnswers, detectTask, githubBase, ground, isSaid, isTrigger, knowledge, labelOf, logArgs, parseIdent, parseLog, parseSource, recentOf, settleLookup, applyReply, asRisk, grepArgs, isSameQuestion, parseAnswers, parseTranscript, rowKey, topHits } from '../hooks/live'
 import type { Live, QuestionSet } from '../types'
 
 const SET: QuestionSet = {
@@ -530,4 +530,17 @@ test('labelOf keeps what the detect step read and decided, with the meeting fold
   expect(label.set).toEqual(['What does it cost?', 'Who leads?'])
   expect(label.next).toEqual(['When live?'])
   expect(label.decided).toEqual({ asked: [1], new: [], current: { set: 1 }, next: [] })
+})
+
+test('a new question counts only when it was said in the new lines; one from the context neither joins nor becomes current', () => {
+  const reply = JSON.stringify({
+    new: [{ question: 'Is the import on PRE already?', to: 'me' }, { question: 'Who owns the export?', to: 'all' }],
+    current: { new: 0 },
+  })
+  const said = ['Who owns the export, by the way?']
+  const state = applyReply({ ...IDLE, isOn: true }, null, reply, 1_000, said)
+  expect(state.added.map(q => q.question)).toEqual(['Who owns the export?'])
+  expect(state.current).toBe('Who owns the export?')
+  expect(applyReply({ ...IDLE, isOn: true }, null, reply, 1_000).added).toHaveLength(2)
+  expect(isSaid('Ja?', ['Ja?'])).toBe(false)
 })

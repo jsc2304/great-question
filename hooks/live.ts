@@ -100,6 +100,16 @@ export const isSameQuestion = (a: string, b: string) => {
   return x.size > 0 && y.size > 0 && shared / (x.size + y.size - shared) >= 0.7
 }
 
+/**
+ * Whether at least 70 % of a question's words were said in these lines. Haiku's own "new" list agreed with hand labels
+ * on whom a question is for in 0.54 of 82 rows, filtered this way in 0.87 (measured 23.10.2026).
+ */
+export const isSaid = (question: string, lines: readonly string[]) => {
+  const q = words(question)
+  const heard = words(lines.join(' '))
+  return q.size > 0 && [...q].filter(w => heard.has(w)).length / q.size >= 0.7
+}
+
 export const SYSTEM =
   'You are listening to a meeting in progress and help me anticipate the questions I will have to answer, and answer them safely. Reply with a JSON object only, no text before or after it.'
 
@@ -201,7 +211,7 @@ const toQuestions = (raw: unknown, limit: number): Question[] =>
  * The catalogue only grows: new rows go to the end, a row keeps its wording, nothing is dropped but a prediction.
  * Rows still without answers wait in `pending` for the answer step.
  */
-export const applyReply = (live: Live, set: QuestionSet | null, reply: string, now = 0): Live => {
+export const applyReply = (live: Live, set: QuestionSet | null, reply: string, now = 0, said?: readonly string[]): Live => {
   let data: { asked?: unknown; new?: unknown; current?: { set?: unknown; new?: unknown } | null; next?: unknown }
   try {
     data = JSON.parse(reply.slice(reply.indexOf('{'), reply.lastIndexOf('}') + 1))
@@ -211,9 +221,11 @@ export const applyReply = (live: Live, set: QuestionSet | null, reply: string, n
   const questions = set?.questions ?? []
   const isKnown = (q: string, list: Question[]) => list.some(k => isSameQuestion(k.question, q))
 
+  // The model's "new" also lists questions from the context lines; with `said` given, only those said in the new lines count.
+  const isNew = (q: Question) => !said || isSaid(q.question, said)
   const fresh = toQuestions(data.new, 3).map(q => ({ ...q, heardAt: now }))
   const added = [...live.added]
-  for (const q of fresh) if (!isKnown(q.question, [...questions, ...added])) added.push(q)
+  for (const q of fresh) if (isNew(q) && !isKnown(q.question, [...questions, ...added])) added.push(q)
 
   const asked = new Set(live.asked)
   for (const n of Array.isArray(data.asked) ? data.asked : []) {
@@ -225,7 +237,8 @@ export const applyReply = (live: Live, set: QuestionSet | null, reply: string, n
   // A new question matched to one already listed takes that row's wording, so it points at a row on screen.
   const asListed = (q: string) => [...questions, ...added].find(k => isSameQuestion(k.question, q))?.question ?? q
   const fromSet = pick && typeof pick.set === 'number' ? questions[pick.set]?.question : undefined
-  const fromNew = !fromSet && pick && typeof pick.new === 'number' ? fresh[pick.new] : undefined
+  const pickedNew = !fromSet && pick && typeof pick.new === 'number' ? fresh[pick.new] : undefined
+  const fromNew = pickedNew && isNew(pickedNew) ? pickedNew : undefined
   const picked = fromSet || fromNew?.question || null
   // Without a usable pick, the question this reply saw asked last stands in: keeping the old one left it on screen for good.
   const seen = [...added.slice(live.added.length).filter(q => q.to !== 'other').map(q => q.question), ...[...asked].filter(q => !live.asked.includes(q))].at(-1)

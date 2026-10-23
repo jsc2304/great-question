@@ -208,7 +208,7 @@ const meeting = (on: On, clock: { now: () => number }) => {
   on('fs.exists', () => ({ value: true }) as never)
   on('fs.stat', () => ((wrote = wrote.lines === lines ? wrote : { lines, at: clock.now() }), { value: { mtimeMs: wrote.at } }) as never)
   on('fs.read', ($, e) =>
-    ({ value: e.path.endsWith('live.ndjson') ? Array.from({ length: lines }, (_, i) => JSON.stringify({ text: `Sentence ${i}?`, endRecordingMs: i })).join('\n') : '' }) as never)
+    ({ value: e.path.endsWith('live.ndjson') ? Array.from({ length: lines }, (_, i) => JSON.stringify({ text: `How do we deploy? Sentence ${i}.`, endRecordingMs: i })).join('\n') : '' }) as never)
   on('model.complete', () => ({ value: { isAnswered: true, text: replies.shift() ?? '{}', usage: {} } }) as never)
   return (reply?: { new?: Row[]; next?: Row[] }) => {
     if (reply) {
@@ -282,7 +282,7 @@ test('a question from the call is answered from the repository; a lookup starts 
   on('fs.exists', () => ({ value: true }) as never)
   on('fs.stat', () => ({ value: { mtimeMs: clock.now() } }) as never)
   on('fs.read', ($, e) =>
-    ({ value: e.path.endsWith('live.ndjson') ? Array.from({ length: lines }, (_, i) => JSON.stringify({ text: `Sentence ${i}?`, endRecordingMs: i })).join('\n') : '' }) as never)
+    ({ value: e.path.endsWith('live.ndjson') ? Array.from({ length: lines }, (_, i) => JSON.stringify({ text: `How do we deploy? Sentence ${i}.`, endRecordingMs: i })).join('\n') : '' }) as never)
   on('model.complete', () => ({ value: { isAnswered: true, text: replies.shift() ?? '{}', usage: {} } }) as never)
   on('process.run', () => ({ value: { exitCode: 0, stdout: 'docs/ops.md:12:We deploy with OpenTofu', stderr: '' } }) as never)
   on('agent.spawn', ($, e) => (spawned.push(e.prompt), { agentId: 'ag1', model: 'haiku' }) as never)
@@ -601,7 +601,7 @@ test('the Model button sets who answers live and how hard it thinks', async ($, 
   on('fs.exists', () => ({ value: true }) as never)
   on('fs.stat', () => ({ value: { mtimeMs: clock.now() } }) as never)
   let lines = 0
-  on('fs.read', ($, e) => ({ value: e.path.endsWith('live.ndjson') ? Array.from({ length: lines }, (_, i) => JSON.stringify({ text: `S ${i}`, endRecordingMs: i })).join('\n') : '' }) as never)
+  on('fs.read', ($, e) => ({ value: e.path.endsWith('live.ndjson') ? Array.from({ length: lines }, (_, i) => JSON.stringify({ text: `How do we deploy? S ${i}`, endRecordingMs: i })).join('\n') : '' }) as never)
   on('model.complete', ($, e) => (asked.push({ model: e.model, effort: e.effort, timeoutMs: e.timeoutMs }), { value: { isAnswered: true, text: JSON.stringify({ new: [{ question: 'How do we deploy?', answers: [] }], current: { new: 0 } }), usage: {} } }) as never)
   on('process.run', () => ({ value: { exitCode: 1, stdout: '', stderr: '' } }) as never)
   on('agent.spawn', ($, e) => (spawned.push({ model: e.model, effort: e.effort }), { model: 'x' }) as never)
