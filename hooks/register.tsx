@@ -14,6 +14,7 @@ import {
   grepArgs,
   ground,
   isTrigger,
+  labelOf,
   knowledge,
   languageRule,
   logArgs,
@@ -543,8 +544,33 @@ const lookUp = async ($: EngineInterface, question: string, set: QuestionSet | n
   await update($, live, l => ({ ...l, looking: [...l.looking, question] }))
 }
 
+// The detect call running now and the lines it read. A question heard while it runs cuts it, so the step starts over
+// with the newer lines; the restarted step runs to its end, so a lively meeting cannot cut every step.
+let detecting: { controller: AbortController; path: string; lines: number; names: string[]; isCuttable: boolean } | null = null
+let isRestart = false
+
+/** On a tick while a step runs: cut its detect call when lines written since hold something worth a step. */
+const cutForNewLines = async ($: EngineInterface) => {
+  const step = detecting
+  if (!step?.isCuttable) return
+  const recording = await runningRecording($, await $.clock.now())
+  if (recording?.path !== step.path) return
+  const { fresh } = parseTranscript(await transcript($, step.path, recording.mtimeMs), step.lines)
+  if (fresh.length && isTrigger(fresh, step.names) && detecting === step) step.controller.abort()
+}
+
 /**
- * One listening tick: read the transcript when it changed and, when the new lines may hold a question (or have waited
+ * Appends a detect step's decisions to `~/.claude/great-question/labels/<day>.jsonl`, training data for a local decision
+ * model. Only where that folder exists: the rows hold the meeting's words, so nobody gets them without asking.
+ */
+const saveLabel = async ($: EngineInterface, label: ReturnType<typeof labelOf>) => {
+  const dir = `${await $.env.get('HOME')}/.claude/great-question/labels`
+  if (!(await $.fs.exists(dir))) return
+  await $.process.run(['sh', '-c', 'cat >> "$1"', 'sh', `${dir}/${label.at.slice(0, 10)}.jsonl`], { stdin: `${JSON.stringify(label)}\n`, timeoutMs: 5000 })
+}
+
+/**
+ * One listening tick:read the transcript when it changed and, when the new lines may hold a question (or have waited
  * STEP_MS), run a step. A step first lets a small model find who asks what (DETECT) and paints that, then writes the
  * answers for every question still waiting (ANSWER) while a subagent looks up the question asked now.
  */
@@ -579,17 +605,32 @@ const listen = async ($: EngineInterface) => {
   // The same opening for both calls, so the second reads it from the cache.
   // ponytail: the whole two-minute tail every step; only the marked lines plus a summary if the cost shows
   const known = knowledge(set, { ...base, recent: me.recent }, await readBriefing($, folder, now))
-  const reply = await $.model.complete({
-    model: 'haiku',
-    effort: 'low',
-    system: SYSTEM,
-    prompt: [{ text: known, cache: true }, { text: detectTask(tail, language, me.name) }],
-    // Thinking counts against the cap on the current Haiku: room for a short think and the JSON.
-    maxTokens: 1200,
-    timeoutMs: 15_000,
-  })
+  const controller = new AbortController()
+  detecting = { controller, path, lines: total, names, isCuttable: !isRestart }
+  isRestart = false
+  const reply = await $.model.complete(
+    {
+      // The level's model, always thinking little: on 82 checked excerpts (23.10.2026) Haiku and Sonnet decided equally
+      // well, Sonnet in about 4.2 s against 7.3 s (median).
+      model: (await levelOf($)).model,
+      effort: 'low',
+      system: SYSTEM,
+      prompt: [{ text: known, cache: true }, { text: detectTask(tail, language, me.name) }],
+      // Thinking counts against the cap: room for a short think and the JSON.
+      maxTokens: 1200,
+      timeoutMs: 15_000,
+    },
+    { signal: controller.signal },
+  )
+  detecting = null
+  // Cut for a question heard meanwhile: the lines stay unread and the next tick steps over them all at once.
+  if (controller.signal.aborted) {
+    isRestart = true
+    await update($, live, l => (l.isOn ? { ...l, status: 'new lines heard; reading again', phase: l.pending.length ? 'answering' : 'listening' } : l))
+    return
+  }
   const text = reply.isAnswered ? reply.text : ''
-  const applied = reply.isAnswered ? applyReply(base, set, text, now) : base
+  const applied = reply.isAnswered ? applyReply(base, set, text, now, fresh) : base
   // No answer, or not the asked-for JSON: the lines stay unread, so a step after RETRY_MS tries them again.
   if (applied === base) {
     retryAt = now + RETRY_MS
@@ -597,11 +638,12 @@ const listen = async ($: EngineInterface) => {
     await update($, live, l => (l.isOn ? { ...l, status: why, phase: l.pending.length ? 'answering' : 'listening' } : l))
     return
   }
+  void saveLabel($, labelOf(now, path, me.name, set, base, tail, text)).catch(() => {})
   const heardNow = { lines: total, changedAt: mtimeMs, recent: me.recent }
   // Folded into the state as it stands now: answers, lookups and rows an earlier step's answer call wrote meanwhile stay.
   const step = await update($, live, l => {
     if (!l.isOn) return l
-    const folded = l.meeting === path ? applyReply({ ...IDLE, ...l }, set, text, now) : applied
+    const folded = l.meeting === path ? applyReply({ ...IDLE, ...l }, set, text, now, fresh) : applied
     return { ...folded, ...heardNow, status: reading({ ...folded, pending: [] }) }
   })
   if (!step.isOn) return
@@ -622,15 +664,19 @@ const listen = async ($: EngineInterface) => {
       try {
         const items = await Promise.all(waiting.map(async q => ({ question: q.question, hits: q.search?.length ? await repoHits($, q.search) : [] })))
         const { model, effort, timeoutMs } = await levelOf($)
-        const answers = await $.model.complete({
-          model,
-          effort,
-          system: GROUND_SYSTEM,
-          prompt: [{ text: known, cache: true }, { text: ground(items, language) }],
-          maxTokens: 3000,
-          timeoutMs,
-        })
-        if (answers.isAnswered) await update($, live, l => applyAnswers({ ...IDLE, ...l }, questions, answers.text))
+        const ask = async (part: typeof items) => {
+          const answers = await $.model.complete({
+            model,
+            effort,
+            system: GROUND_SYSTEM,
+            prompt: [{ text: known, cache: true }, { text: ground(part, language) }],
+            maxTokens: 3000,
+            timeoutMs,
+          })
+          if (answers.isAnswered) await update($, live, l => applyAnswers({ ...IDLE, ...l }, part.map(i => i.question), answers.text))
+        }
+        // The question asked now gets a call of its own, beside the one for the rest: its answers need not wait for theirs.
+        await Promise.all([items.filter(i => i.question === step.current), items.filter(i => i.question !== step.current)].filter(p => p.length).map(ask))
       } finally {
         // ponytail: a call that never settles keeps its questions here until the session restarts; timeoutMs bounds it
         questions.forEach(q => answering.delete(q))
@@ -747,7 +793,7 @@ export const register: Register = on => {
     // Links a first try missed (git not ready, a source new since) come with the next round.
     $.clock.every(LINK_MS, () => void linkPending($))
     $.clock.every(TICK_MS, () => {
-      if (isListening) return
+      if (isListening) return void cutForNewLines($).catch(() => {})
       isListening = true
       void listen($).finally(() => (isListening = false))
     })

@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { IDLE, applyAnswers, detectTask, githubBase, ground, isTrigger, knowledge, logArgs, parseIdent, parseLog, parseSource, recentOf, settleLookup, applyReply, asRisk, grepArgs, isSameQuestion, parseAnswers, parseTranscript, rowKey, topHits } from '../hooks/live'
+import { IDLE, applyAnswers, detectTask, githubBase, ground, isSaid, isTrigger, knowledge, labelOf, logArgs, parseIdent, parseLog, parseSource, recentOf, settleLookup, applyReply, asRisk, grepArgs, isSameQuestion, parseAnswers, parseTranscript, rowKey, topHits } from '../hooks/live'
 import type { Live, QuestionSet } from '../types'
 
 const SET: QuestionSet = {
@@ -325,11 +325,23 @@ const listening = async ($: Parameters<Parameters<typeof test>[1]>[0], on: On, f
   // Answer calls can be held open, as a slow model keeps them, until the test lets them go.
   let release = () => {}
   const held = new Promise<void>(go => (release = go))
+  // The next detect call can be held open too, as a slow model keeps it; the call resolves when the step cuts it.
+  let detectGate: Promise<void> | null = null
+  const holdDetect = () => {
+    let go = () => {}
+    detectGate = new Promise<void>(r => (go = r))
+    return () => go()
+  }
   on('model.complete', async ($, e) => {
     prompts.push((e.promptBlocks ?? []) as { text: string; cache?: boolean }[])
     seen.push(live)
     const text = replies.shift() ?? '{}'
     if (holdAnswers && e.system?.startsWith('You answer questions')) await held
+    if (detectGate && e.system?.startsWith('You are listening')) {
+      const gate = detectGate
+      detectGate = null
+      await gate
+    }
     return { value: text === 'FAIL' ? { isAnswered: false, reason: 'overloaded' } : { isAnswered: true, text, usage: {} } } as never
   })
   on('process.run', ($, e) => {
@@ -343,7 +355,7 @@ const listening = async ($: Parameters<Parameters<typeof test>[1]>[0], on: On, f
   await $.session.start({ cwd: '/repo' } as never)
   /** A line said in the call: the file grows and its time moves. */
   const say = (text: string) => (said.push(text), (meet.mtimeMs = clock.now()))
-  return { clock, say, replies, prompts, meet, seen, release, state: () => live }
+  return { clock, say, replies, prompts, meet, seen, release, holdDetect, state: () => live }
 }
 
 test('new lines without a trigger wait up to twelve seconds for a step; my name steps at once', async ($, on) => {
@@ -390,8 +402,11 @@ test('a step paints the questions first, then their answers; one left out keeps 
   expect(between.added[0]).toMatchObject({ to: 'me', asker: 'Maria', heardAt: 1_003_000, answers: [] })
   expect(between.pending).toEqual(['Is the fix on PRE?', 'When does it go live?'])
   // The answer step opens with the same knowledge, so the cache serves it, and names each question with its lines.
+  // The question asked now has a call of its own, the rest a second one.
   expect(prompts[1]?.[0]).toEqual(prompts[0]?.[0])
-  expect(prompts[1]?.[1]?.text).toContain('1: When does it go live?\nno lines found')
+  expect(prompts[1]?.[1]?.text).toContain('0: Is the fix on PRE?\nno lines found')
+  expect(prompts[1]?.[1]?.text).not.toContain('When does it go live?')
+  expect(prompts[2]?.[1]?.text).toContain('0: When does it go live?\nno lines found')
 
   const after = state()
   expect(after.added[0]?.answers[0]?.text).toBe('It is on Q; PRE is still open')
@@ -405,8 +420,8 @@ test('a step paints the questions first, then their answers; one left out keeps 
   say('Okay, und wann geht das live?')
   replies.push('{"asked": [], "current": null}', '{"answers": {"0": [{"text": "Not dated yet", "risk": "vague", "note": "no date"}]}}')
   await clock.advance(3_000)
-  expect(prompts[3]?.[1]?.text).toContain('0: When does it go live?')
-  expect(prompts[3]?.[1]?.text).not.toContain('Is the fix on PRE?')
+  expect(prompts[4]?.[1]?.text).toContain('0: When does it go live?')
+  expect(prompts[4]?.[1]?.text).not.toContain('Is the fix on PRE?')
   const done = state()
   expect(done.next[0]?.answers[0]?.text).toBe('Not dated yet')
   expect(done.pending).toEqual([])
@@ -519,4 +534,57 @@ test('a question for someone else lands in the list but does not take the place 
   const all = applyReply(other, null, JSON.stringify({ new: [{ question: 'Does anyone have news on PRE?', to: 'all' }], current: { new: 0 } }), 4_000)
   expect(all.current).toBe('Does anyone have news on PRE?')
   expect(all.currentAt).toBe(4_000)
+})
+
+test('labelOf keeps what the detect step read and decided, with the meeting folder as its id', () => {
+  const before = { ...IDLE, isOn: true, next: [{ question: 'When live?', relevance: 3, confidence: 2, answers: [] }] }
+  const reply = 'ok {"asked": [1], "new": [], "current": {"set": 1}, "next": []}'
+  const label = labelOf(Date.UTC(2026, 9, 23, 9), '/x/meetings/abc-123/live.ndjson', 'Jan', SET, before, '> [t] Call: Who leads?', reply)
+  expect(label.at).toBe('2026-10-23T09:00:00.000Z')
+  expect(label.meeting).toBe('abc-123')
+  expect(label.set).toEqual(['What does it cost?', 'Who leads?'])
+  expect(label.next).toEqual(['When live?'])
+  expect(label.decided).toEqual({ asked: [1], new: [], current: { set: 1 }, next: [] })
+})
+
+test('a new question counts only when it was said in the new lines; one from the context neither joins nor becomes current', () => {
+  const reply = JSON.stringify({
+    new: [{ question: 'Is the import on PRE already?', to: 'me' }, { question: 'Who owns the export?', to: 'all' }],
+    current: { new: 0 },
+  })
+  const said = ['Who owns the export, by the way?']
+  const state = applyReply({ ...IDLE, isOn: true }, null, reply, 1_000, said)
+  expect(state.added.map(q => q.question)).toEqual(['Who owns the export?'])
+  expect(state.current).toBe('Who owns the export?')
+  expect(applyReply({ ...IDLE, isOn: true }, null, reply, 1_000).added).toHaveLength(2)
+  expect(isSaid('Ja?', ['Ja?'])).toBe(false)
+})
+
+test('a question heard while a step runs cuts it once; the step starts over with all new lines and is not cut again', async ($, on) => {
+  const { clock, say, replies, prompts, holdDetect, state } = await listening($, on)
+  const detects = () => prompts.filter(p => p[1]?.text.startsWith('The last two minutes'))
+  const first = holdDetect()
+  say('Can you share the screen?')
+  await clock.advance(3_000)
+  expect(detects()).toHaveLength(1)
+  say('Alex, is the fix on PRE?')
+  await clock.advance(3_000)
+  // The engine resolves a cut call at once; the test kit's held call needs letting go. The status shows it was cut:
+  // the lines stay unread, and the next tick reads both as new.
+  first()
+  await clock.advance(1)
+  expect(state().status).toBe('new lines heard; reading again')
+  const second = holdDetect()
+  replies.push(JSON.stringify({ new: [{ question: 'Is the fix on PRE?', to: 'me' }], current: { new: 0 } }))
+  await clock.advance(3_000)
+  expect(detects()).toHaveLength(2)
+  expect(detects()[1]?.[1]?.text).toContain('> [] Call: Can you share the screen?')
+  expect(detects()[1]?.[1]?.text).toContain('> [] Call: Alex, is the fix on PRE?')
+  // The restarted step runs to its end, whatever is said meanwhile.
+  say('And when does it go live?')
+  await clock.advance(6_000)
+  expect(detects()).toHaveLength(2)
+  second()
+  await clock.advance(3_000)
+  expect(state().current).toBe('Is the fix on PRE?')
 })

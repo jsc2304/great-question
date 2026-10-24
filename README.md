@@ -114,7 +114,7 @@ Buttons in the panel:
 - **Open all** and **Close all**: open or close every visible question. **Close all** shows as soon as one question is open and closes them all at once.
 - **More**: shows the less frequent settings and actions:
   - **Language: Auto / DE / EN** of questions and answers. *Auto* uses the language the meeting is held in (from the invitation, slides and earlier transcripts when generating, from the conversation when listening). Applies to everything generated from then on, live included; nothing already shown is translated. Notes and reasons are in English.
-  - **Model**: who answers while listening and how hard it thinks: *Fast (Haiku)*, *Balanced (Sonnet, low effort)* or *Thorough (Sonnet, high effort)*. Applies to the live step, the answers from the repository and the model of the ASKED NOW lookup; the background preparation keeps the session's model. Slower levels answer later: a step still running when the next is due is skipped.
+  - **Model**: who answers while listening and how hard it thinks: *Fast (Haiku)*, *Balanced (Sonnet, low effort)* or *Thorough (Sonnet, high effort)*. Applies to finding the questions asked (always with low effort), the answers from the repository and the model of the ASKED NOW lookup; the background preparation keeps the session's model. Slower levels answer later: a step still running when the next is due is skipped.
   - **Sort**: by answer confidence (*safest to answer*) or by likelihood (*most likely asked*).
   - **Meeting / Practice**: *Meeting* shows the strongest first, *Practice* turns the order round and puts the weakest questions on top.
   - **Legend**: what the risk marks mean.
@@ -152,6 +152,7 @@ What gets prepared depends on the project: with slides, a pitch preparation or a
 - **Transcription by Wispr Flow.** Recording happens locally, transcription happens in Wispr Flow's cloud ([Wispr: on-device recording](https://wisprflow.ai/notetaker/what-is-on-device-recording), as of 14.10.2026). Great Question reads the finished transcript from the Wispr Flow app's local file.
 - **Prepared questions** are stored locally per project folder. They stay on the computer. A new session does not reopen them by itself: the panel asks first whether to show them, prepare new ones or listen live.
 - **Listening along** sends the last two minutes of the transcript, the prepared questions, the repository lines found for new questions, your git user name, your last five commit subjects and a briefing from the folder to a Claude model through the same access as the session: Haiku by default, Sonnet when chosen under **More → Model**. The briefing holds, when they exist, the sections "Status", "Offene Fäden" and "Tickets" of the project's Second Brain hub (`~/projects/second-brain/projects/<repo>/<repo>.md`, 8,000 characters, first; it wins on a ticket's state), the first 6,000 characters of `memory/MEMORY.md`, the two newest files in `memory/daily-logs/` (3,000 characters each) and the last 15 commit subjects, at most 24,000 characters, re-read at most once a minute. A lookup for the question asked now runs as a read-only subagent with the same model in the session's folder. Speaker names from Wispr Flow are not sent; names mentioned in the conversation are in the text.
+- **Training data, only when you ask for it.** If the folder `~/.claude/great-question/labels/` exists, listening appends every step's decisions to `<day>.jsonl` in it: the two-minute transcript excerpt, your git user name, the questions listed at that moment and what the model decided (which questions were asked, whom they were for, what comes next). The rows are meant for training a local decision model and stay on the computer. Without the folder nothing is written; delete it to stop.
 - **Exports** with live results contain questions from the conversation, names included. In projects with confidential content, add `question-sets/` to `.gitignore` or review it before committing.
 
 ## Development
@@ -168,12 +169,21 @@ claude plugin test .
 
 A change reaches running sessions only with a release, since the mod installs from this repository on GitHub: raise `version` in `.claude-plugin/plugin.json` and add the `CHANGELOG.md` section in the same pull request, merge, tag `vX.Y.Z`, then run `claude plugin marketplace update great-question` and `claude plugin update great-question@great-question` and restart the session. The desktop app loads the mod from the plugin cache, not from the working folder, so unmerged work never reaches it; test it with `claude plugin test .`.
 
+Measure the live step before and after a prompt or model change. The script runs `detectTask` from `hooks/live.ts` through the engine (`claude -p` with the small plugin in `scripts/bench/plugin`) on hand-checked transcript excerpts and reports how often the model names the right addressee, and how long a call takes. The excerpts are meeting content and stay outside the repository: label rows in `~/.claude/great-question/labels/backfill.jsonl`, hand labels in `~/.claude/great-question/laya/eval.json` (`{"rows": [{"i": <row>, "a": "me"|"all"|"other"|"none"}]}`).
+
+```bash
+node --no-warnings scripts/bench/bench.ts haiku,sonnet 3
+```
+
+Measure through the engine, not with `claude -p --model`: the CLI thinks differently and reported Haiku at 11 s per call where the engine took 7 s (23.10.2026).
+
 | File | Contents |
 |---|---|
 | `hooks/register.tsx` | commands, the question-set tool, panel, export |
 | `hooks/live.ts` | listening along: read the transcript, fold in the model's reply |
 | `types/index.d.ts` | data types and the panel's state |
 | `tests/` | tests for panel, export and listening along |
+| `scripts/bench/` | measures the live step on hand-checked excerpts |
 
 ## Feedback
 
