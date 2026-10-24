@@ -2,6 +2,21 @@
 
 Versions follow semantic versioning. Newest release first.
 
+## 0.17.0 — 2026-10-24
+
+**Update the mod and run `/reload-plugins`.** On **More → Model**, *Balanced* and *Thorough* now also use Sonnet to find the questions asked, which is about 3 seconds faster per step and uses more of your plan; *Fast* stays on Haiku.
+
+### Changed
+
+- The question asked now shows sooner. A step that is still reading the transcript stops when a new question is heard and starts over with the newer lines, instead of making the new question wait for it. The question asked now gets its answers from a call of its own, beside the one for the predicted questions: about 4 instead of 6.5 seconds with Haiku (measured 23.10.2026).
+- Finding the questions asked follows **More → Model**, always with low effort. On 82 checked transcript excerpts, Haiku and Sonnet named whom a question was for equally well; Sonnet took about 4.2 seconds, Haiku about 7.3 (median).
+- Fewer old questions come back as new. A question counts as new only when most of its words were said in the lines heard since the last step; before, the model also listed questions from the older context lines. On the same excerpts, agreement on whom a question is for rose from 0.54 to 0.87.
+
+### Added
+
+- Training data, only when you ask for it: if the folder `~/.claude/great-question/labels/` exists, listening writes each step's excerpt and decisions to a file per day there. Without the folder nothing is written.
+- `scripts/bench/` measures finding the questions asked on hand-checked excerpts, for comparing prompts and models.
+
 ## 0.16.0 — 2026-10-21
 
 **Update the mod and run `/reload-plugins`; nothing else to do.**
